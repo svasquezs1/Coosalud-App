@@ -1,0 +1,38 @@
+{% extends "base.html" %}{% from "_macros.html" import kpi, tabla, chips %}{% block contenido %}
+<h2>4. Documentos y contactos</h2>
+<p class="lead">Revisa que el tipo de documento sea coherente con la edad y separa a quién se le puede escribir (celular y correo válidos) para los envíos masivos.</p>
+<form method="post" action="{{ url_for('accion_4') }}">
+<button type="submit" name="accion" value="guardar" class="sr" tabindex="-1" aria-hidden="true"></button>
+<h3>Reglas de edad por tipo de documento</h3>
+<p class="muted">Valores iniciales de referencia. Deben confirmarse con el área; solo la regla de recién nacidos (CN, más de 90 días) aparece hoy en las consultas.</p>
+<div class="tw" style="max-height:230px"><table>
+<thead><tr><th>Tipo</th><th>Edad mínima (años)</th><th>Edad máxima (años)</th><th>Días máximos de vida</th><th></th></tr></thead>
+<tbody>{% for r in s.reglas_doc %}<tr>
+<td><input type="text" name="d_tipo" value="{{ r.tipo }}" size="6"></td><td><input type="text" name="d_min" value="{{ r.min }}" size="6"></td>
+<td><input type="text" name="d_max" value="{{ r.max }}" size="6"></td><td><input type="text" name="d_dias" value="{{ r.dias }}" size="6"></td>
+<td><button class="mini" name="accion" value="quitar:{{ loop.index0 }}" type="submit">Quitar</button></td></tr>{% endfor %}</tbody></table></div>
+<div class="row" style="margin-top:8px"><button class="mini" name="accion" value="agregar" type="submit">+ Agregar tipo</button></div>
+<div class="row" style="margin-top:12px">
+  <label class="row">Fecha de referencia <input type="date" name="fecha_ref" value="{{ s.fecha_ref }}"></label>
+  <label class="row"><input type="checkbox" name="excluir_cn" value="1" {{ 'checked' if s.excluir_cn }}> Sacar de la base final los CN con más días de los permitidos</label>
+</div>
+<div class="row" style="margin-top:12px"><button class="btn" name="accion" value="ejecutar" type="submit">Revisar documentos y contactos</button></div>
+</form>
+{% set r = s.r4 %}
+{% if r %}
+<div id="resultados">
+<h3>Documentos</h3>
+<div class="kpis">{{ kpi(r.total,'afiliados revisados') }}{{ kpi(r.docs|length,'documentos por revisar (' ~ pct(r.docs|length, r.total) ~ ')','warn' if r.docs|length else 'ok') }}{{ kpi(r.final_n,'en la base final','ok') }}{% if r.excluir_cn %}{{ kpi(r.cn_vencidos,'CN fuera de plazo excluidos') }}{% endif %}</div>
+{% if por_tipo %}<div class="chips">{% for k, v in por_tipo %}<span class="chip">{{ k }}: {{ fmt(v) }}</span>{% endfor %}</div>{% endif %}
+{{ tabla(tabla_docs) }}
+<h3>Contactos para envíos masivos</h3>
+{% if not r.tiene_contacto %}<div class="msg info">La base no trae las columnas CELULAR y CORREO_ELECTRONICO, así que no se revisaron contactos.</div>
+{% else %}
+<div class="kpis">{{ kpi(r.cat.ambos,'con celular y correo válidos','ok') }}{{ kpi(r.cat.solo_cel,'solo celular válido') }}{{ kpi(r.cat.solo_mail,'solo correo válido') }}{{ kpi(r.cat.ninguno,'sin ningún contacto válido','bad' if r.cat.ninguno else 'ok') }}</div>
+<div class="chips"><span class="chip">Celulares con formato inválido: {{ fmt(r.cat.cel_invalido) }}</span><span class="chip">Correos con formato inválido: {{ fmt(r.cat.mail_invalido) }}</span><span class="chip warn">Celulares compartidos por varios afiliados: {{ fmt(r.celulares_compartidos) }} números en {{ fmt(r.afiliados_cel_compartido) }} afiliados</span></div>
+<h3>Afiliados sin contacto válido</h3>{{ tabla(tabla_sin) }}
+{% endif %}
+</div>
+{% endif %}
+<div class="row" style="margin-top:20px"><a class="btn sec" href="{{ url_for('paso', n=3) }}">Atrás</a>{% if r %}<a class="btn" href="{{ url_for('paso', n=5) }}">Ver resumen</a>{% endif %}</div>
+{% endblock %}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% from "_macros.html" import kpi %}{% block contenido %}
+<h2>5. Resumen y descargas</h2>
+<p class="lead">Resultado del ciclo completo. Los archivos se generan al momento, se envían a su navegador y no se guardan en el servidor.</p>
+{% set a = s.r2 %}{% set b = s.r3 %}{% set c = s.r4 %}
+<div class="kpis">{{ kpi(a.total,'filas recibidas del nivel nacional') }}{{ kpi(c.final_n,'afiliados en la base final','ok') }}{{ kpi(a.no_cruzan|length,'vigentes que no cruzan con BDUA','bad' if a.no_cruzan|length else 'ok') }}{{ kpi(b.por_corregir|length,'IPS por corregir','bad' if b.por_corregir|length else 'ok') }}{{ kpi(b.sin_regla_total,'en municipios sin regla','warn') }}{{ kpi(c.docs|length,'documentos por revisar','warn') }}{{ kpi(c.cat.ninguno,'sin contacto válido') }}</div>
+<h3>Afiliados por IPS (10 con más afiliados)</h3>
+<div class="bars">{% for k, n_ in top %}<div class="b"><span>{{ k }}</span><div class="track"><div class="fill" style="width:{{ [2, 100 * n_ / tope]|max }}%"></div></div><span>{{ fmt(n_) }}</span></div>{% endfor %}</div>
+<form method="get" action="{{ url_for('descargar') }}">
+  <div class="row" style="margin-top:14px"><label class="row">Formato de descarga
+    <select name="formato"><option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV</option></select></label></div>
+  <div class="dl" style="margin-top:10px">{% for clave, (nombre, _f, cuantos) in descargas.items() %}
+    <button class="btn sec" name="clave" value="{{ clave }}" type="submit" {{ '' if cuantos else 'disabled' }}><span>{{ nombre }}</span><span>{{ fmt(cuantos) }}</span></button>{% endfor %}</div>
+</form>
+<div class="row" style="margin-top:20px"><a class="btn sec" href="{{ url_for('paso', n=4) }}">Atrás</a></div>
+{% endblock %}

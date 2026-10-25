@@ -1,0 +1,6 @@
+flask>=3.0,<4
+pandas>=2.2,<4
+openpyxl>=3.1
+xlsxwriter>=3.2
+waitress>=3.0
+pytest>=8.0

@@ -1,0 +1,25 @@
+{% extends "base.html" %}{% from "_macros.html" import kpi, tabla, chips %}{% block contenido %}
+<h2>2. Cruce con BDUA</h2>
+<p class="lead">Arma la base depurada (vigentes, dentro de los departamentos, sin repetidos) y la compara con las tablas BDUA.</p>
+<form method="post" action="{{ url_for('ejecutar_2') }}">
+  <label class="row"><input type="checkbox" name="solo_numero" value="1" {{ 'checked' if s.solo_numero }}> Cruzar solo por número de documento (como las consultas actuales)</label>
+  <p class="muted">Por defecto se cruza por tipo y número, para evitar coincidencias falsas entre tipos de documento distintos.</p>
+  <div class="row" style="margin-top:10px"><button class="btn" type="submit">Ejecutar cruce</button></div>
+</form>
+{% set r = s.r2 %}
+{% if r %}
+<h3>Base depurada</h3>
+<div class="kpis">{{ kpi(r.total,'filas en la base nacional') }}{{ kpi(r.vigentes,'con estado vigente') }}{{ kpi(r.no_vigentes,'con otro estado') }}{{ kpi(r.fuera,'vigentes fuera de los departamentos') }}{{ kpi(r.duplicados,'repetidos descartados') }}{{ kpi(r.base_n,'afiliados en la base depurada','ok') }}</div>
+<h3>Vigentes contra las tablas BDUA</h3>
+<div class="kpis">{{ kpi(r.cruzan,'cruzan (' ~ pct(r.cruzan, r.base_n) ~ ')','ok') }}{{ kpi(r.no_cruzan|length,'no cruzan (' ~ pct(r.no_cruzan|length, r.base_n) ~ ')','bad' if r.no_cruzan|length else 'ok') }}{{ kpi(r.bdua_total,'filas BDUA cargadas') }}</div>
+{% if r.ok_por_estado %}<p class="muted">Estado en BDUA de los que cruzan:</p><div class="chips">{{ chips(r.ok_por_estado) }}</div>{% endif %}
+<h3>Vigentes que no aparecen en BDUA</h3>
+<p class="muted">Son los casos para revisar a mano: hoy se encuentran con consultas y macros.</p>
+{{ tabla(tabla_no_cruzan) }}
+<h3>Con otro estado en la base nacional, ¿qué dice BDUA?</h3>
+<div class="kpis">{{ kpi(r.nv_encontrados,'aparecen en alguna tabla BDUA (' ~ pct(r.nv_encontrados, r.no_vigentes) ~ ')','warn') }}{{ kpi(r.no_vigentes - r.nv_encontrados,'no aparecen en BDUA') }}</div>
+{% if r.nv_por_tabla %}<div class="chips">{{ chips(r.nv_por_tabla) }}</div><div class="chips">{{ chips(r.nv_por_estado) }}</div>{% endif %}
+{{ tabla(tabla_nv) }}
+{% endif %}
+<div class="row" style="margin-top:20px"><a class="btn sec" href="{{ url_for('paso', n=1) }}">Atrás</a>{% if r %}<a class="btn" href="{{ url_for('paso', n=3) }}">Continuar a IPS</a>{% endif %}</div>
+{% endblock %}

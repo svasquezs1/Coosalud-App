@@ -1,0 +1,9 @@
+@echo off
+rem Cruce de afiliados - arranque en Windows (solo este equipo: http://localhost:8080)
+cd /d "%~dp0"
+if not exist .venv (
+  python -m venv .venv
+  .venv\Scripts\pip install -r requirements.txt
+)
+.venv\Scripts\python app.py
+pause

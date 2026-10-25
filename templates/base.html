@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cruce de afiliados</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='estilos.css') }}">
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div><h1>Cruce de afiliados contra BDUA</h1><p class="sub">Sprint 1 · Cruce, IPS por municipio, documentos y contactos</p></div>
+  <div class="row">
+    <form method="post" action="{{ url_for('alternar_mascara') }}"><button class="mini" type="submit">{{ 'Mostrar documentos completos' if s.ocultar_docs else 'Ocultar documentos en pantalla' }}</button></form>
+    <form method="post" action="{{ url_for('limpiar') }}"><button class="btn danger" type="submit">Limpiar todos los datos</button></form>
+  </div>
+</div></header>
+<div class="wrap">
+  <p class="privacy"><b>Los datos se procesan solo en la memoria de este servidor.</b> No se guardan en disco ni en una base de datos, no salen a internet y desaparecen al pulsar «Limpiar todos los datos», tras 30 minutos sin uso o al apagar el servidor. Solo se crea un archivo cuando usted pulsa «Descargar».</p>
+  <nav class="steps" aria-label="Pasos">
+    {% for k, nombre in PASOS %}<a href="{{ url_for('paso', n=k) }}" class="{{ 'off' if k > s.paso_max }}{{ ' done' if k < s.paso_max }}"{% if k == n %} aria-current="step"{% endif %}>{{ k }}. {{ nombre }}</a>{% endfor %}
+  </nav>
+  {% if mensaje %}<div class="msg {{ mensaje[0] }}">{{ mensaje[1] }}</div>{% endif %}
+  <section class="step on">
+  {% block contenido %}{% endblock %}
+  </section>
+  <footer>Prototipo académico de la Universidad EAFIT para el curso Sistemas de Información. Los límites y reglas marcados como «por confirmar» deben validarse con el área antes de uso real.</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,42 @@
+{% extends "base.html" %}{% block contenido %}
+<h2>1. Cargar archivos</h2>
+<p class="lead">Suba la base que envía el nivel nacional y las tablas BDUA del mes. Acepta Excel (.xlsx) y CSV. Los procesos siguen en orden: primero el cruce, luego la IPS y al final los contactos.</p>
+<form method="post" action="{{ url_for('subir') }}" enctype="multipart/form-data">
+<div class="grid g2">
+  <div class="box"><label class="t" for="nacional">Base del nivel nacional (BD_SINERGIA)</label>
+    <input type="file" id="nacional" name="nacional" accept=".xlsx,.csv"></div>
+  <div class="box"><label class="t" for="bdua">Tablas BDUA (una o varias)</label>
+    <input type="file" id="bdua" name="bdua" accept=".xlsx,.csv" multiple></div>
+</div>
+<div class="row" style="margin-top:12px"><button class="btn sec" type="submit">Subir archivos</button><span class="muted">Puede subir primero un grupo y luego otro.</span></div>
+</form>
+
+<div class="grid g2" style="margin-top:6px">
+  <div>
+  {% if s.nac is not none %}
+    <div class="file"><span>{{ s.nac_nombre }} · {{ fmt(s.nac|length) }} filas</span>
+      <form method="post" action="{{ url_for('quitar') }}"><input type="hidden" name="que" value="nac"><button class="mini" type="submit">Quitar</button></form></div>
+    <div class="chips">{% if nac_falt %}<span class="chip bad">Faltan columnas: {{ nac_falt|join(', ') }}</span>{% else %}<span class="chip ok">Columnas requeridas completas</span>{% endif %}
+    {% if nac_opc %}<span class="chip warn">Sin {{ nac_opc|join(', ') }}: no se podrá revisar contactos</span>{% endif %}</div>
+  {% endif %}
+  </div>
+  <div>
+  {% for nombre, t in s.bdua.items() %}
+    <div class="file"><span>{{ nombre }} · {{ fmt(t|length) }} filas
+      {% if bdua_falt[nombre] %}<span class="chip bad">faltan: {{ bdua_falt[nombre]|join(', ') }}</span>{% else %}<span class="chip ok">ok</span>{% endif %}</span>
+      <form method="post" action="{{ url_for('quitar') }}"><input type="hidden" name="que" value="bdua:{{ nombre }}"><button class="mini" type="submit">Quitar</button></form></div>
+  {% endfor %}
+  </div>
+</div>
+
+{% if s.nac is not none %}
+<form method="post" action="{{ url_for('continuar_1') }}">
+  <h3>Qué cuenta como afiliado vigente</h3>
+  <p class="muted">Marque los estados de la base nacional que se consideran vigentes. Esto cambia con los estados nuevos del nivel nacional, así que se confirma con el área antes de usar los resultados.</p>
+  <div class="estados">{% for e, n_, marcado in estados %}<label><input type="checkbox" name="estado" value="{{ e }}" {{ 'checked' if marcado }}> {{ e }} <span class="muted">({{ fmt(n_) }})</span></label>{% endfor %}</div>
+  <h3>Departamentos donde opera Coosalud</h3>
+  <div class="row"><input type="text" name="deps" value="{{ s.deps }}" size="16" aria-label="Departamentos"><span class="muted">Códigos separados por coma. Se incluyen también los afiliados con portabilidad hacia estos departamentos.</span></div>
+  <div class="row" style="margin-top:20px"><button class="btn" type="submit" {{ '' if listo else 'disabled' }}>Continuar al cruce</button></div>
+</form>
+{% endif %}
+{% endblock %}

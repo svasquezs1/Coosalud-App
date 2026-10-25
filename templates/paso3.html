@@ -1,0 +1,46 @@
+{% extends "base.html" %}{% from "_macros.html" import kpi, tabla %}{% block contenido %}
+<h2>3. IPS por municipio</h2>
+<p class="lead">Compara la IPS asignada de cada afiliado con la regla de su municipio y régimen. Las reglas son una tabla que se puede editar, agregar y quitar sin tocar código.</p>
+<form method="post" action="{{ url_for('accion_3') }}" enctype="multipart/form-data" id="reglas">
+<button type="submit" name="accion" value="guardar" class="sr" tabindex="-1" aria-hidden="true"></button>
+<h3>Reglas de asignación</h3>
+<div class="row">
+  <button class="mini" name="accion" value="agregar" type="submit">+ Agregar regla</button>
+  <a class="mini" href="{{ url_for('reglas_csv') }}" style="text-decoration:none;padding:3px 9px">Descargar reglas (CSV)</a>
+  <input type="file" name="csv_reglas" accept=".csv"><button class="mini" name="accion" value="importar" type="submit">Cargar reglas (CSV)</button>
+  <button class="mini" name="accion" value="restablecer" type="submit">Volver a las reglas iniciales</button>
+  <button class="mini" name="accion" value="guardar" type="submit">Guardar cambios</button>
+</div>
+<p class="muted">«Régimen» puede ser CONTRIBUTIVO, SUBSIDIADO o * (ambos). En «Otras IPS permitidas» ponga los códigos adicionales separados por coma: en los municipios con dos IPS, el afiliado conserva su IPS si es una de las permitidas.</p>
+<div class="tw" style="max-height:300px"><table>
+<thead><tr><th>Depto.</th><th>Municipio</th><th>Régimen</th><th>IPS por defecto</th><th>Otras IPS permitidas</th><th>Nombre (referencia)</th><th></th></tr></thead>
+<tbody>{% for r in s.reglas_ips %}<tr>
+<td><input type="text" name="r_dep" value="{{ r.dep }}" size="3"></td>
+<td><input type="text" name="r_city" value="{{ r.city }}" size="4"></td>
+<td><select name="r_reg">{% for o in ['*','CONTRIBUTIVO','SUBSIDIADO'] %}<option {{ 'selected' if o == r.reg }}>{{ o }}</option>{% endfor %}</select></td>
+<td><input type="text" name="r_ips" value="{{ r.ips }}" size="14"></td>
+<td><input type="text" name="r_alt" value="{{ r.alt }}" size="14"></td>
+<td><input type="text" name="r_nombre" value="{{ r.nombre }}" size="16"></td>
+<td><button class="mini" name="accion" value="quitar:{{ loop.index0 }}" type="submit">Quitar</button></td></tr>{% endfor %}</tbody></table></div>
+<div class="row" style="margin-top:14px">
+  <label class="row"><input type="checkbox" name="aplicar" value="1" {{ 'checked' if s.aplicar_ips }}> Aplicar la IPS propuesta en la copia de trabajo</label>
+  <button class="btn" name="accion" value="ejecutar" type="submit">Revisar IPS</button>
+</div>
+
+{% set r = s.r3 %}
+{% if r %}
+<div id="resultados">
+<div class="kpis">{{ kpi(r.total,'afiliados revisados') }}{{ kpi(r.correctas,'con la IPS correcta (' ~ pct(r.correctas, r.total) ~ ')','ok') }}{{ kpi(r.por_corregir|length,'con IPS por corregir (' ~ pct(r.por_corregir|length, r.total) ~ ')','bad' if r.por_corregir|length else 'ok') }}{{ kpi(r.sin_regla_total,'en municipios sin regla','warn') }}</div>
+{% if r.aplicado %}<div class="msg info">La IPS propuesta ya está aplicada en la copia de trabajo (la columna IPS_ORIGINAL guarda la anterior). Los archivos cargados no se modifican.</div>
+{% else %}<div class="msg info">No se aplicó ninguna corrección: la copia de trabajo conserva la IPS actual.</div>{% endif %}
+<h3>IPS por corregir</h3>{{ tabla(tabla_corregir) }}
+<h3>Municipios sin regla</h3>
+<p class="muted">No hay regla para estos municipios, así que no se pudo comprobar su IPS. Pulse «Crear regla» para empezar con la IPS más frecuente y ajústela en la tabla de arriba.</p>
+{% if sin_regla %}<div class="tw"><table><thead><tr><th>Depto.</th><th>Municipio</th><th>Afiliados</th><th>IPS más frecuente</th><th></th></tr></thead><tbody>
+{% for x in sin_regla %}<tr><td>{{ x.DEPARTAMENTO }}</td><td>{{ x.MUNICIPIO }}</td><td>{{ fmt(x.AFILIADOS) }}</td><td>{{ x.IPS_MAS_FRECUENTE }}</td><td><button class="mini" name="accion" value="crear:{{ loop.index0 }}" type="submit">Crear regla</button></td></tr>{% endfor %}
+</tbody></table></div>{% else %}<p class="muted">Todos los municipios tienen regla.</p>{% endif %}
+</div>
+{% endif %}
+</form>
+<div class="row" style="margin-top:20px"><a class="btn sec" href="{{ url_for('paso', n=2) }}">Atrás</a>{% if r %}<a class="btn" href="{{ url_for('paso', n=4) }}">Continuar a documentos y contactos</a>{% endif %}</div>
+{% endblock %}

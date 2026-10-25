@@ -1,0 +1,38 @@
+# --- Entorno de Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Sistema operativo y editores ---
+.DS_Store
+__MACOSX/
+Thumbs.db
+.idea/
+.vscode/
+
+# --- Secretos y configuración local ---
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# --- DATOS DE AFILIADOS: NUNCA AL REPOSITORIO (Ley 1581 de 2012: datos de salud) ---
+# Se ignoran todas las hojas de cálculo y CSV... salvo las carpetas de reglas y de datos 100 % ficticios.
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+*.txt
+!requirements.txt
+*.parquet
+*.zip
+*.bak
+*.sql
+!datos/*.csv
+!datos_prueba_ficticios/*.xlsx

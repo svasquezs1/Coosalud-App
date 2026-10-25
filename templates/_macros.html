@@ -1,0 +1,8 @@
+{% macro kpi(n, etiqueta, clase='') %}<div class="kpi {{ clase }}"><b>{{ fmt(n) if n is number else n }}</b><span>{{ etiqueta }}</span></div>{% endmacro %}
+{% macro tabla(v) %}
+{% if v.vacia %}<p class="muted">Sin registros.</p>{% else %}
+<div class="tw"><table><thead><tr>{% for c in v.cab %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+<tbody>{% for f in v.filas %}<tr>{% for x in f %}<td>{{ x }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+{% if v.total > v.limite %}<p class="muted">Se muestran {{ v.limite }} de {{ fmt(v.total) }}. Descargue el archivo para ver todo.</p>{% endif %}
+{% endif %}{% endmacro %}
+{% macro chips(d) %}{% for k, v in d.items() %}<span class="chip">{{ k }}: {{ fmt(v) }}</span>{% endfor %}{% endmacro %}
