@@ -36,7 +36,7 @@ def test_solo_numero_cruza_igual_o_mas(datos, r2):
 
 def test_ips(r2):
     r3 = P.revisar_ips(r2.base, C.reglas_ips_por_defecto(), True)
-    assert (r3.total, r3.correctas, len(r3.por_corregir), r3.sin_regla_total) == (522, 350, 65, 107)
+    assert (r3.total, r3.correctas, len(r3.por_corregir), r3.sin_regla_total) == (522, 441, 65, 16)
     assert r3.base is not r2.base and "IPS_ORIGINAL" in r3.base and "IPS_ORIGINAL" not in r2.base   # no toca la base original
     # lo corregido queda con la IPS propuesta
     r3b = P.revisar_ips(r3.base.drop(columns="IPS_ORIGINAL"), C.reglas_ips_por_defecto(), False)
@@ -44,8 +44,10 @@ def test_ips(r2):
 
 
 def test_regla_nueva_para_municipio_sin_regla(r2):
-    reglas = C.reglas_ips_por_defecto() + [dict(dep="05", city="042", reg="*", ips="050420547801", alt="", nombre="Santa Fe de Antioquia")]
-    r3 = P.revisar_ips(r2.base, reglas, False)
+    sin_042 = [r for r in C.reglas_ips_por_defecto() if r["city"] != "042"]
+    assert P.revisar_ips(r2.base, sin_042, False).sin_regla_total == 107
+    con = sin_042 + [dict(dep="05", city="042", reg="*", ips="050420547801", alt="", nombre="Santa Fe de Antioquia")]
+    r3 = P.revisar_ips(r2.base, con, False)
     assert r3.sin_regla_total == 107 - 91 and not r3.aplicado
 
 
@@ -95,3 +97,38 @@ def test_base_nacional_con_columnas_que_se_llaman_como_las_de_salida(datos, r2):
     assert r.cruzan == r2.cruzan and r.no_cruzan.shape == r2.no_cruzan.shape
     assert list(r.nv_filas["ESTADO_BDUA"]) == list(r2.nv_filas["ESTADO_BDUA"])
     assert "X" not in set(r.nv_filas["ESTADO_BDUA"])
+
+
+def test_archivos_por_prestador_como_las_consultas_del_area():
+    import pandas as pd
+    from cruce import municipios as M
+    from cruce.config import prestadores_por_defecto
+    f = lambda reg, ips, ciudad="154", dep="05": dict(REGIMEN=reg, DEPARTAMENTO_PORTABILIDAD=dep, CIUDAD_PORTABILIDAD=ciudad, IPS_ASIGNADA=ips, NOM_IPS="")
+    final = pd.DataFrame([f("SUBSIDIADO", "051540220101"), f("SUBSIDIADO", "051540220101"), f("SUBSIDIADO", "051541468702"),
+                          f("SUBSIDIADO", ""), f("CONTRIBUTIVO", "051541468702"), f("CONTRIBUTIVO", "OTRA"), f("CONTRIBUTIVO", ""),
+                          f("SUBSIDIADO", "050010909901", "360"), f("CONTRIBUTIVO", "X", "001"), f("SUBSIDIADO", "X", "001"),
+                          f("SUBSIDIADO", "052500213301", "250")])
+    d = prestadores_por_defecto()
+    n = lambda a: len(M.filas_del_prestador(final, d, a))
+    assert n("BD CAUCASIA - E.S.E. HOSPITAL CESAR URIBE - RECUPERACION") == 2          # subsidiado con la IPS principal
+    assert n("BD CAUCASIA - E.S.E. HOSPITAL CESAR URIBE - PYM") == 3                    # subsidiado con cualquiera de las dos
+    assert n("BD CAUCASIA - MEFESALUD IPS - RECUPERACION") == 1 + 1 + 3                 # subsidiado con su IPS o sin IPS + todo el contributivo
+    prom = M.filas_del_prestador(final, d, "BD PROMEDAN")                               # Medellín solo contributivo; Itagüí ambos; IPS forzada
+    assert len(prom) == 2 and set(prom["IPS_ASIGNADA"]) == {"050010909901"}
+    assert final.loc[8, "IPS_ASIGNADA"] == "X"                                         # la base final no se modifica
+    tabla = M.prestadores(final, d, [])
+    assert tabla.set_index("ARCHIVO").loc["BD PROMEDAN", "CARPETA"] == "VARIOS MUNICIPIOS"
+    auto = M.agrupar(final, [], d)                  # Caucasia y El Bagre salen por prestador; Promedan es adicional y no quita nada
+    assert set(zip(auto["MUNICIPIO"], auto["REGIMEN"])) == {("360", "SUBSIDIADO"), ("001", "CONTRIBUTIVO"), ("001", "SUBSIDIADO")}
+
+
+def test_varias_llaves_cruzan_por_cualquiera_de_ellas(datos):
+    nac, bd = datos[0], datos[2]
+    est = set(C.ESTADOS_VIGENTES_CONOCIDOS)
+    uno = P.cruzar(nac, bd, est, {"05", "17", "27"}, llaves=["tipo_numero"])
+    num = P.cruzar(nac, bd, est, {"05", "17", "27"}, llaves=["solo_numero"])
+    ambas = P.cruzar(nac, bd, est, {"05", "17", "27"}, llaves=["tipo_numero", "solo_numero"])
+    assert ambas.cruzan == max(uno.cruzan, num.cruzan)                  # solo_numero incluye a tipo+número
+    assert ambas.por_llave == {"tipo_numero": uno.cruzan, "solo_numero": num.cruzan}
+    assert ambas.cruzan + len(ambas.no_cruzan) == ambas.base_n and ambas.llaves == ["tipo_numero", "solo_numero"]
+    assert P.columnas_llave_faltantes(nac, bd, ["tipo_numero", "afl_id"]) != []   # AFL_ID_BDUA no está en los datos de prueba

@@ -6,7 +6,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 import pandas as pd
 
-from .config import OPT_NAC
+from .config import COLUMNA_AFL, OPT_NAC
 from .lectura import columnas_faltantes
 
 # ---------------------------------------------------------------- utilidades
@@ -16,9 +16,23 @@ def _t(s: pd.Series) -> pd.Series:
 def _u(s: pd.Series) -> pd.Series:
     return _t(s).str.upper()
 
-def _llave(df: pd.DataFrame, solo_numero: bool) -> pd.Series:
+def _llave(df: pd.DataFrame, llave: str) -> pd.Series:
+    """Llave de cruce de cada fila. Si la persona no tiene el dato de la llave queda en "" y nunca cruza
+    (así dos filas vacías no se emparejan entre sí)."""
+    if llave == "afl_id":
+        return _t(df[COLUMNA_AFL])
     num = _t(df["NUMERO_IDENTIFICACION"])
-    return num if solo_numero else _u(df["TIPO_IDENTIFICACION"]) + "|" + num
+    if llave == "solo_numero":
+        return num
+    return (_u(df["TIPO_IDENTIFICACION"]) + "|" + num).where(num != "", "")
+
+
+def columnas_llave_faltantes(nac: pd.DataFrame, bdua: dict[str, pd.DataFrame], llaves) -> list[str]:
+    """Nombres de los archivos que no traen la columna que exige alguna de las llaves elegidas (solo AFL_ID_BDUA exige una extra)."""
+    llaves = [llaves] if isinstance(llaves, str) else list(llaves)
+    if "afl_id" not in llaves:
+        return []
+    return ([f"la base nacional"] if COLUMNA_AFL not in nac.columns else []) + [n for n, t in bdua.items() if COLUMNA_AFL not in t.columns]
 
 def _pad(s: pd.Series, n: int) -> pd.Series:
     return _t(s).str.zfill(n)
@@ -33,21 +47,28 @@ class ResultadoCruce:
     total: int; vigentes: int; no_vigentes: int; fuera: int; duplicados: int; base_n: int
     cruzan: int; no_cruzan: pd.DataFrame; nv_filas: pd.DataFrame; nv_encontrados: int
     nv_por_tabla: dict; nv_por_estado: dict; ok_por_estado: dict; bdua_total: int; solo_numero: bool
+    llave: str = "tipo_numero"; sin_llave: int = 0
+    llaves: list = field(default_factory=lambda: ["tipo_numero"]); por_llave: dict = field(default_factory=dict)
     base: pd.DataFrame = field(repr=False, default=None)
 
 
 def cruzar(nac: pd.DataFrame, bdua: dict[str, pd.DataFrame], estados_vigentes: set[str],
-           departamentos: set[str], solo_numero: bool = False) -> ResultadoCruce:
+           departamentos: set[str], solo_numero: bool = False, llave: str | None = None,
+           llaves: list[str] | None = None) -> ResultadoCruce:
+    """``llaves``: una o varias de "tipo_numero" (por defecto), "solo_numero" y "afl_id". Con varias, un afiliado
+    cruza si coincide por CUALQUIERA de ellas. ``llave`` y ``solo_numero`` se conservan por compatibilidad."""
+    if not llaves:
+        llaves = [llave or ("solo_numero" if solo_numero else "tipo_numero")]
+    llaves = list(dict.fromkeys(llaves))
     deps = {d.strip().zfill(2) for d in departamentos if d.strip()}
     # Las columnas internas empiezan por «_» (minúscula) para no chocar con columnas de la base nacional
     # (los encabezados de los archivos se pasan a MAYÚSCULAS al leerlos).
-    # Índice BDUA: todas las filas de todas las tablas, con la tabla de origen.
-    partes = []
-    for nombre, t in bdua.items():
-        partes.append(pd.DataFrame({"_k": _llave(t, solo_numero), "_tabla": nombre, "_estado": _t(t["ESTADO"])}))
-    idx = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame({"_k": [], "_tabla": [], "_estado": []})
-    llaves_bdua = set(idx["_k"])
-    primer_estado = idx.drop_duplicates("_k").set_index("_k")["_estado"]
+    # Índice BDUA por llave: todas las filas de todas las tablas, con la tabla de origen.
+    indices: dict[str, pd.DataFrame] = {}
+    for lk in llaves:
+        partes = [pd.DataFrame({"_k": _llave(t, lk), "_tabla": nombre, "_estado": _t(t["ESTADO"])}) for nombre, t in bdua.items()]
+        idx = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame({"_k": [], "_tabla": [], "_estado": []})
+        indices[lk] = idx[idx["_k"] != ""]          # filas BDUA sin dato de llave no se pueden emparejar
 
     est = _u(nac["ESTADO"])
     es_vig = est.isin(estados_vigentes)
@@ -64,19 +85,28 @@ def cruzar(nac: pd.DataFrame, bdua: dict[str, pd.DataFrame], estados_vigentes: s
     elegido = elegido.assign(_o=elegido["_k"].map(orden)).sort_values("_o").drop(columns=["_p", "_k", "_o"])
     base = elegido.reset_index(drop=True)
 
-    # A. Estados distintos de vigente que aparecen en BDUA
-    k_nv = _llave(no_vig, solo_numero)
-    nv_aux = no_vig.assign(_k=k_nv)
-    nv_aux = nv_aux[nv_aux["_k"].isin(llaves_bdua)]
-    nv = nv_aux.merge(idx, on="_k", how="inner")
+    # A. Estados distintos de vigente que aparecen en BDUA (por cualquiera de las llaves; cada fila nacional se cuenta una vez)
+    no_vig = no_vig.assign(_fila=range(len(no_vig)))
+    union = []
+    for lk in llaves:
+        aux = no_vig.assign(_k=_llave(no_vig, lk))
+        union.append(aux[aux["_k"].isin(set(indices[lk]["_k"]))].merge(indices[lk], on="_k", how="inner"))
+    nv = pd.concat(union, ignore_index=True).drop_duplicates(["_fila", "_tabla", "_estado"]) if union else no_vig.iloc[0:0]
     nv_filas = pd.DataFrame({
         "TIPO_IDENTIFICACION": _t(nv["TIPO_IDENTIFICACION"]), "NUMERO_IDENTIFICACION": _t(nv["NUMERO_IDENTIFICACION"]),
         "ESTADO_NACIONAL": _t(nv["ESTADO"]), "DEPARTAMENTO": _t(nv["DEPARTAMENTO"]),
         "CIUDAD": _t(nv["CIUDAD"]) if "CIUDAD" in nv else "", "TABLA_BDUA": nv["_tabla"], "ESTADO_BDUA": nv["_estado"]})
 
     # B. Vigentes de la base depurada que no aparecen en BDUA
-    k_base = _llave(base, solo_numero)
-    cruza = k_base.isin(llaves_bdua)
+    cruza = pd.Series(False, index=base.index); estado_bdua = pd.Series("", index=base.index)
+    sin_ninguna = pd.Series(True, index=base.index); por_llave = {}
+    for lk in llaves:
+        k = _llave(base, lk)
+        coincide = k.isin(set(indices[lk]["_k"]))
+        primer = indices[lk].drop_duplicates("_k").set_index("_k")["_estado"]
+        nuevo_ = coincide & ~cruza
+        estado_bdua[nuevo_] = k[nuevo_].map(primer)
+        por_llave[lk] = int(coincide.sum()); cruza |= coincide; sin_ninguna &= (k == "")
     nc = base[~cruza]
     no_cruzan = pd.DataFrame({
         "TIPO_IDENTIFICACION": _t(nc["TIPO_IDENTIFICACION"]), "NUMERO_IDENTIFICACION": _t(nc["NUMERO_IDENTIFICACION"]),
@@ -86,10 +116,11 @@ def cruzar(nac: pd.DataFrame, bdua: dict[str, pd.DataFrame], estados_vigentes: s
     return ResultadoCruce(
         total=len(nac), vigentes=len(vigentes), no_vigentes=len(no_vig), fuera=len(vigentes) - len(alc),
         duplicados=len(alc) - len(base), base_n=len(base), cruzan=int(cruza.sum()), no_cruzan=no_cruzan.reset_index(drop=True),
-        nv_filas=nv_filas.reset_index(drop=True), nv_encontrados=len(nv_aux),
+        nv_filas=nv_filas.reset_index(drop=True), nv_encontrados=int(nv["_fila"].nunique()) if len(nv) else 0,
         nv_por_tabla=_cuenta(nv_filas["TABLA_BDUA"]), nv_por_estado=_cuenta(nv_filas["ESTADO_BDUA"]),
-        ok_por_estado=_cuenta(k_base[cruza].map(primer_estado)), bdua_total=sum(len(t) for t in bdua.values()),
-        solo_numero=solo_numero, base=base)
+        ok_por_estado=_cuenta(estado_bdua[cruza]), bdua_total=sum(len(t) for t in bdua.values()),
+        solo_numero=llaves == ["solo_numero"], llave=llaves[0], sin_llave=int(sin_ninguna.sum()), base=base,
+        llaves=llaves, por_llave=por_llave)
 
 
 # ---------------------------------------------------------------- paso 3: IPS por municipio

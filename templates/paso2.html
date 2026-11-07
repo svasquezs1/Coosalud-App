@@ -2,8 +2,10 @@
 <h2>2. Cruce con BDUA</h2>
 <p class="lead">Arma la base depurada (vigentes, dentro de los departamentos, sin repetidos) y la compara con las tablas BDUA.</p>
 <form method="post" action="{{ url_for('ejecutar_2') }}">
-  <label class="row"><input type="checkbox" name="solo_numero" value="1" {{ 'checked' if s.solo_numero }}> Cruzar solo por número de documento (como las consultas actuales)</label>
-  <p class="muted">Por defecto se cruza por tipo y número, para evitar coincidencias falsas entre tipos de documento distintos.</p>
+  <h3 style="margin-top:0">¿Con qué se cruza?</h3>
+  <p class="muted" style="margin-top:0">Marque una, dos o las tres. Con varias, un afiliado cruza si coincide por <b>cualquiera</b> de las marcadas.</p>
+  {% for k, nombre in llaves.items() %}<label class="row"><input type="checkbox" name="llave" value="{{ k }}" {{ 'checked' if k in s.llaves }}> {{ nombre }}</label>{% endfor %}
+  <p class="muted">Por defecto se cruza por tipo y número, para evitar coincidencias falsas entre tipos de documento distintos; «solo el número» encuentra más coincidencias pero puede unir a dos personas con documentos de distinto tipo. Con AFL_ID_BDUA, la columna debe estar en la base nacional y en todas las tablas BDUA{% if llave_falta %} (<b>ahora falta en: {{ llave_falta|join(', ') }}</b>){% endif %}; los afiliados sin ese dato no cruzan.</p>
   <div class="row" style="margin-top:10px"><button class="btn" type="submit">Ejecutar cruce</button></div>
 </form>
 {% set r = s.r2 %}
@@ -12,6 +14,8 @@
 <div class="kpis">{{ kpi(r.total,'filas en la base nacional') }}{{ kpi(r.vigentes,'con estado vigente') }}{{ kpi(r.no_vigentes,'con otro estado') }}{{ kpi(r.fuera,'vigentes fuera de los departamentos') }}{{ kpi(r.duplicados,'repetidos descartados') }}{{ kpi(r.base_n,'afiliados en la base depurada','ok') }}</div>
 <h3>Vigentes contra las tablas BDUA</h3>
 <div class="kpis">{{ kpi(r.cruzan,'cruzan (' ~ pct(r.cruzan, r.base_n) ~ ')','ok') }}{{ kpi(r.no_cruzan|length,'no cruzan (' ~ pct(r.no_cruzan|length, r.base_n) ~ ')','bad' if r.no_cruzan|length else 'ok') }}{{ kpi(r.bdua_total,'filas BDUA cargadas') }}</div>
+<p class="muted">Cruzado por: {% for k in r.llaves %}{{ llaves[k] }}{{ '; ' if not loop.last }}{% endfor %}.</p>
+{% if r.llaves|length > 1 %}<div class="chips">{% for k in r.llaves %}<span class="chip">Coinciden por {{ llaves[k].split(' (')[0]|lower }}: {{ fmt(r.por_llave[k]) }}</span>{% endfor %}</div>{% endif %}{% if r.sin_llave %}<div class="chips"><span class="chip warn">{{ fmt(r.sin_llave) }} afiliados sin dato de ninguna de las llaves marcadas: no pueden cruzar y salen en «no cruzan»</span></div>{% endif %}
 {% if r.ok_por_estado %}<p class="muted">Estado en BDUA de los que cruzan:</p><div class="chips">{{ chips(r.ok_por_estado) }}</div>{% endif %}
 <h3>Vigentes que no aparecen en BDUA</h3>
 <p class="muted">Son los casos para revisar a mano: hoy se encuentran con consultas y macros.</p>

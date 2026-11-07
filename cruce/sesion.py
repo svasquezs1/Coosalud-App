@@ -20,14 +20,18 @@ class Sesion:
     ocultar_docs: bool = True
     nac: Optional[pd.DataFrame] = None
     nac_nombre: str = ""
-    nac_headers: list = field(default_factory=list)
+    nac_orig: list = field(default_factory=list)      # encabezados tal como vienen en el archivo
+    nac_headers: list = field(default_factory=list)   # encabezados ya con los alias aplicados
     bdua: dict = field(default_factory=dict)          # nombre -> DataFrame
+    bdua_orig: dict = field(default_factory=dict)
     bdua_headers: dict = field(default_factory=dict)
+    alias: list = field(default_factory=C.alias_columnas_por_defecto)
     estados: Optional[list] = None                    # estados que se marcaron como vigentes
     deps: str = C.DEPARTAMENTOS_POR_DEFECTO
-    solo_numero: bool = False
+    llaves: list = field(default_factory=lambda: ["tipo_numero"])
     reglas_ips: list = field(default_factory=C.reglas_ips_por_defecto)
     aplicar_ips: bool = True
+    prestadores: list = field(default_factory=C.prestadores_por_defecto)
     reglas_doc: list = field(default_factory=C.reglas_documento_por_defecto)
     fecha_ref: str = ""
     excluir_cn: bool = True

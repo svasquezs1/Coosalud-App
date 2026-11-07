@@ -74,3 +74,8 @@ form{margin:0}
 label.mini{display:inline-block}
 .msg.ok{background:var(--ok-soft);color:var(--ok)}
 .sr{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+
+details{margin-top:10px}
+summary{cursor:pointer;padding:6px 0}
+details.mun{border:1px solid var(--line);border-radius:9px;padding:2px 10px;margin-top:8px;background:var(--card)}
+form.ayuda{margin-top:8px;padding:8px 10px;border-radius:9px;background:var(--warn-soft)}

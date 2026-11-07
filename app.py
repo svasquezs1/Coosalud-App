@@ -5,7 +5,10 @@ import io
 import os
 import re
 import secrets
+import zipfile
+from difflib import get_close_matches
 from functools import wraps
+from urllib.parse import quote
 
 import pandas as pd
 from flask import (Flask, Request, Response, abort, g, redirect, render_template, request, url_for)
@@ -13,7 +16,8 @@ from flask import (Flask, Request, Response, abort, g, redirect, render_template
 from cruce import config as C
 from cruce import proceso as P
 from cruce.exportar import a_bytes
-from cruce.lectura import columnas_faltantes, leer_tabla
+from cruce import municipios as M
+from cruce.lectura import clave_columna, columnas_faltantes, leer_tabla, nombres_efectivos, renombrar
 from cruce.sesion import Almacen, Sesion
 
 
@@ -123,9 +127,13 @@ def paso(n: int):
         ctx.update(nac_falt=columnas_faltantes(s.nac_headers, C.REQ_NAC) if s.nac is not None else [],
                    nac_opc=columnas_faltantes(s.nac_headers, C.OPT_NAC) if s.nac is not None else [],
                    bdua_falt={k: columnas_faltantes(h, C.REQ_BDUA) for k, h in s.bdua_headers.items()},
+                   req_nac=C.REQ_NAC,
+                   sug_nac={f: _opciones(s.nac_orig, s.nac_headers, f) for f in columnas_faltantes(s.nac_headers, C.REQ_NAC)},
+                   sug_bdua={k: {f: _opciones(s.bdua_orig[k], h, f) for f in columnas_faltantes(h, C.REQ_BDUA)} for k, h in s.bdua_headers.items()},
                    estados=_estados(s), listo=_listo(s))
     elif n == 2:
         r = s.r2
+        ctx.update(llaves=C.LLAVES, llave_falta=P.columnas_llave_faltantes(s.nac, s.bdua, "afl_id"))
         if r is not None:
             ctx.update(
                 tabla_no_cruzan=vista(r.no_cruzan, [("Tipo", "TIPO_IDENTIFICACION"), ("Número", "NUMERO_IDENTIFICACION"), ("Estado", "ESTADO"),
@@ -155,7 +163,8 @@ def paso(n: int):
     elif n == 5:
         r4 = s.r4
         top = r4.final["IPS_ASIGNADA"].replace("", "(vacía)").value_counts().head(10)
-        ctx.update(top=[(k, int(v)) for k, v in top.items()], tope=int(top.iloc[0]) if len(top) else 1, descargas=_descargas(s))
+        ctx.update(top=[(k, int(v)) for k, v in top.items()], tope=int(top.iloc[0]) if len(top) else 1, descargas=_descargas(s),
+                   municipios=(mun := _municipios(s)), n_archivos=sum(len(m['archivos']) for m in mun))
     return render_template(f"paso{n}.html", **ctx)
 
 
@@ -178,12 +187,14 @@ def subir():
     try:
         f = request.files.get("nacional")
         if f and f.filename:
-            s.nac, s.nac_headers = leer_tabla(f.filename, f.read()); s.nac_nombre = f.filename; s.estados = None
+            s.nac, s.nac_orig = leer_tabla(f.filename, f.read(), s.alias); s.nac_nombre = f.filename; s.estados = None
+            s.nac_headers = nombres_efectivos(s.nac_orig, s.alias)
             s.invalidar_desde(2)
         for f in request.files.getlist("bdua"):
             if f and f.filename:
                 nombre = os.path.splitext(f.filename)[0]
-                s.bdua[nombre], s.bdua_headers[nombre] = leer_tabla(f.filename, f.read())
+                s.bdua[nombre], s.bdua_orig[nombre] = leer_tabla(f.filename, f.read(), s.alias)
+                s.bdua_headers[nombre] = nombres_efectivos(s.bdua_orig[nombre], s.alias)
                 s.invalidar_desde(2)
     except Exception as e:  # archivo dañado, formato no válido, etc.
         avisar("err", f"No se pudo leer el archivo: {e}")
@@ -193,9 +204,9 @@ def subir():
 def quitar():
     s: Sesion = g.s; que = request.form.get("que", "")
     if que == "nac":
-        s.nac, s.nac_nombre, s.nac_headers, s.estados = None, "", [], None
+        s.nac, s.nac_nombre, s.nac_orig, s.nac_headers, s.estados = None, "", [], [], None
     elif que.startswith("bdua:"):
-        s.bdua.pop(que[5:], None); s.bdua_headers.pop(que[5:], None)
+        s.bdua.pop(que[5:], None); s.bdua_headers.pop(que[5:], None); s.bdua_orig.pop(que[5:], None)
     s.invalidar_desde(2)
     return redirect(url_for("paso", n=1))
 
@@ -214,15 +225,95 @@ def continuar_1():
     return redirect(url_for("paso", n=2))
 
 
+# ------------------------------------------------------------------ paso 1: nombres de columnas (alias)
+def _opciones(originales: list[str], efectivos: list[str], falta: str) -> list[str]:
+    """Columnas del archivo que la aplicación no reconoce, con las más parecidas a la que falta primero."""
+    conocidas = set(C.REQ_NAC) | set(C.OPT_NAC) | set(C.REQ_BDUA) | {C.COLUMNA_AFL}
+    libres = sorted({o for o, e in zip(originales, efectivos) if o == e and e.upper() not in conocidas and o})
+    cercanas = get_close_matches(falta.upper(), [o.upper() for o in libres], n=3, cutoff=0.4)
+    primeras = [o for c in cercanas for o in libres if o.upper() == c]
+    return primeras + [o for o in libres if o not in primeras]
+
+
+def _alias_desde_form() -> list[dict]:
+    vistos, res = set(), []
+    for o, d in zip(request.form.getlist("al_origen"), request.form.getlist("al_destino")):
+        o, d = o.strip(), clave_columna(d) if d.strip() else ""
+        if o and d and clave_columna(o) not in vistos:
+            vistos.add(clave_columna(o)); res.append(dict(origen=o, destino=d))
+    return res
+
+
+def _reaplicar_alias(s: Sesion) -> None:
+    """Cambia los nombres de columna de lo ya cargado sin volver a leer los archivos."""
+    if s.nac is not None:
+        s.nac_headers = renombrar(s.nac, s.nac_orig, s.alias)
+    for k, t in s.bdua.items():
+        s.bdua_headers[k] = renombrar(t, s.bdua_orig[k], s.alias)
+    s.invalidar_desde(2)
+
+
+@app.post("/paso/1/alias")
+def alias_columnas():
+    s: Sesion = g.s; accion = request.form.get("accion", "guardar")
+    antes_ = list(s.alias)
+    if accion == "asignar":      # «Falta X: la columna de mi archivo es Y»
+        falta, col = clave_columna(request.form.get("falta", "")), request.form.get("columna", "").strip()
+        if falta and col:
+            s.alias = [a for a in s.alias if clave_columna(a["origen"]) != clave_columna(col)] + [dict(origen=col, destino=falta)]
+    else:
+        nuevas = _alias_desde_form() if "al_origen" in request.form else list(s.alias)
+        if accion == "agregar":
+            nuevas.append(dict(origen="", destino=""))
+        elif accion.startswith("quitar:"):
+            i = int(accion[7:]) if accion[7:].isdigit() else -1
+            if 0 <= i < len(nuevas): nuevas.pop(i)
+        elif accion == "restablecer":
+            nuevas = C.alias_columnas_por_defecto()
+        elif accion == "importar":
+            try:
+                f = request.files.get("csv_alias")
+                t, _ = leer_tabla(f.filename, f.read())
+                if not {"NOMBRE_EN_EL_ARCHIVO", "NOMBRE_EN_LA_APLICACION"} <= set(t.columns):
+                    raise ValueError("faltan las columnas NOMBRE_EN_EL_ARCHIVO y NOMBRE_EN_LA_APLICACION")
+                nuevas = [dict(origen=a.strip(), destino=clave_columna(b)) for a, b in
+                          zip(t["NOMBRE_EN_EL_ARCHIVO"], t["NOMBRE_EN_LA_APLICACION"]) if a.strip() and b.strip()]
+            except Exception as e:
+                avisar("err", f"No se pudieron cargar los nombres de columnas: {e}"); return redirect(url_for("paso", n=1) + "#alias")
+        # la fila vacía recién agregada se conserva en pantalla pero no cuenta como alias
+        s.alias = nuevas
+    if [a for a in s.alias if a["origen"] and a["destino"]] != [a for a in antes_ if a["origen"] and a["destino"]]:
+        _reaplicar_alias(s)
+    return redirect(url_for("paso", n=1) + "#alias")
+
+
+@app.get("/alias_columnas.csv")
+def alias_csv():
+    df = pd.DataFrame([{"NOMBRE_EN_EL_ARCHIVO": a["origen"], "NOMBRE_EN_LA_APLICACION": a["destino"], "NOTA": ""} for a in g.s.alias])
+    datos, mime = a_bytes(df, "csv")
+    return Response(datos, mimetype=mime, headers={"Content-Disposition": "attachment; filename=nombres_de_columnas.csv"})
+
+
 # ------------------------------------------------------------------ paso 2
 @app.post("/paso/2/ejecutar")
 @requiere_paso(2)
 def ejecutar_2():
     s: Sesion = g.s
-    s.solo_numero = request.form.get("solo_numero") == "1"
+    marcadas = [k for k in request.form.getlist("llave") if k in C.LLAVES]
+    llaves = [k for k in C.LLAVES if k in marcadas]            # siempre en el mismo orden
+    if not llaves:
+        avisar("err", "Marque al menos una forma de cruzar.")
+        return redirect(url_for("paso", n=2))
+    s.llaves = llaves
+    falta = P.columnas_llave_faltantes(s.nac, s.bdua, llaves)
+    if falta:   # se avisa antes de cruzar y se explica qué hacer
+        s.invalidar_desde(3)
+        avisar("err", f"La llave {C.COLUMNA_AFL} no está en: {', '.join(falta)}. Si la columna existe con otro nombre, "
+                      "indíquelo en «Nombres de columnas» del paso 1; si no, desmarque esa opción.")
+        return redirect(url_for("paso", n=2))
     deps = {x for x in re.split(r"[,\s;]+", s.deps) if x}
     s.invalidar_desde(3)
-    s.r2 = P.cruzar(s.nac, s.bdua, {e.upper() for e in s.estados}, deps, s.solo_numero)
+    s.r2 = P.cruzar(s.nac, s.bdua, {e.upper() for e in s.estados}, deps, llaves=llaves)
     s.paso_max = max(s.paso_max, 3)
     return redirect(url_for("paso", n=2))
 
@@ -349,6 +440,119 @@ def descargar():
     datos, mime = a_bytes(d[clave][1](), formato)
     nombre = f"{clave}_{dt.date.today().isoformat()}.{formato}"
     return Response(datos, mimetype=mime, headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
+
+
+# ------------------------------------------------------------------ paso 5: archivos por municipio e IPS (HU-28, HU-29)
+def _municipios(s: Sesion) -> list[dict]:
+    """Carpetas (municipio o «VARIOS MUNICIPIOS») con sus archivos, listos para mostrar.
+    Los municipios con prestadores definidos salen por prestador; los demás, por régimen e IPS."""
+    por_carpeta: dict[str, dict] = {}
+    g_ = M.agrupar(s.r4.final, s.reglas_ips, s.prestadores)
+    for r in g_.itertuples():
+        c = por_carpeta.setdefault(r.NOMBRE_MUNICIPIO, dict(nombre=r.NOMBRE_MUNICIPIO, afiliados=0, archivos=[]))
+        c["afiliados"] += int(r.AFILIADOS)
+        c["archivos"].append(dict(nombre=r.ARCHIVO, afiliados=int(r.AFILIADOS), ruta="descargar_municipio",
+                                  params=dict(reg=r.REGIMEN, dep=r.DEPARTAMENTO, mun=r.MUNICIPIO, ips=r.IPS)))
+    for r in M.prestadores(s.r4.final, s.prestadores, s.reglas_ips).itertuples():
+        c = por_carpeta.setdefault(r.CARPETA, dict(nombre=r.CARPETA, afiliados=0, archivos=[]))
+        c["afiliados"] += int(r.AFILIADOS)
+        c["archivos"].append(dict(nombre=r.ARCHIVO, afiliados=int(r.AFILIADOS), ruta="descargar_prestador", params=dict(archivo=r.ARCHIVO)))
+    return sorted(por_carpeta.values(), key=lambda m: m["nombre"])
+
+
+def _con_nombre(df: pd.DataFrame, s: Sesion) -> pd.DataFrame:
+    orig = {h.upper(): h for h in s.nac_headers}
+    return df.rename(columns=lambda c: orig.get(c, c))
+
+
+def _descarga(datos: bytes, mime: str, nombre: str) -> Response:
+    ascii_ = re.sub(r"[^\x20-\x7e]", "_", nombre).replace('"', "'")      # cabecera compatible + nombre real en UTF-8
+    return Response(datos, mimetype=mime, headers={"Content-Disposition": f"attachment; filename=\"{ascii_}\"; filename*=UTF-8''{quote(nombre)}"})
+
+
+@app.get("/descargar_municipio")
+@requiere_paso(5)
+def descargar_municipio():
+    s: Sesion = g.s; formato = "csv" if request.args.get("formato") == "csv" else "xlsx"
+    q = {k: request.args.get(k, "") for k in ("reg", "dep", "mun", "ips")}
+    fila = M.agrupar(s.r4.final, s.reglas_ips, s.prestadores)
+    fila = fila[(fila["REGIMEN"] == q["reg"]) & (fila["DEPARTAMENTO"] == q["dep"]) & (fila["MUNICIPIO"] == q["mun"]) & (fila["IPS"] == q["ips"])]
+    if fila.empty:
+        abort(404)
+    df = _con_nombre(M.filas_del_archivo(s.r4.final, q["reg"], q["dep"], q["mun"], q["ips"]), s)
+    datos, mime = a_bytes(df, formato)
+    return _descarga(datos, mime, f"{fila.iloc[0]['ARCHIVO']}.{formato}")
+
+
+@app.get("/descargar_prestador")
+@requiere_paso(5)
+def descargar_prestador():
+    s: Sesion = g.s; formato = "csv" if request.args.get("formato") == "csv" else "xlsx"
+    archivo = request.args.get("archivo", "")
+    tabla = M.prestadores(s.r4.final, s.prestadores, s.reglas_ips)
+    if archivo not in set(tabla["ARCHIVO"]):
+        abort(404)
+    df = _con_nombre(M.filas_del_prestador(s.r4.final, s.prestadores, archivo), s)
+    datos, mime = a_bytes(df, formato)
+    return _descarga(datos, mime, f"{archivo}.{formato}")
+
+
+@app.get("/descargar_zip")
+@requiere_paso(5)
+def descargar_zip():
+    """Todos los archivos por municipio en un solo ZIP (una carpeta por municipio). Se arma en memoria."""
+    s: Sesion = g.s; formato = "csv" if request.args.get("formato") == "csv" else "xlsx"
+    grupos = M.agrupar(s.r4.final, s.reglas_ips, s.prestadores)
+    prest = M.prestadores(s.r4.final, s.prestadores, s.reglas_ips)
+    if grupos.empty and prest.empty:
+        abort(404)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for r in grupos.itertuples():
+            df = _con_nombre(M.filas_del_archivo(s.r4.final, r.REGIMEN, r.DEPARTAMENTO, r.MUNICIPIO, r.IPS), s)
+            z.writestr(f"{M.limpiar_nombre(r.NOMBRE_MUNICIPIO)}/{r.ARCHIVO}.{formato}", a_bytes(df, formato)[0])
+        for r in prest.itertuples():
+            df = _con_nombre(M.filas_del_prestador(s.r4.final, s.prestadores, r.ARCHIVO), s)
+            z.writestr(f"{M.limpiar_nombre(r.CARPETA)}/{r.ARCHIVO}.{formato}", a_bytes(df, formato)[0])
+    return _descarga(buf.getvalue(), "application/zip", f"archivos_por_municipio_{dt.date.today().isoformat()}.zip")
+
+
+COLUMNAS_PRESTADORES = ["ARCHIVO", "DEPARTAMENTO", "MUNICIPIO", "REGIMEN", "IPS_INCLUIDAS", "INCLUIR_SIN_IPS", "IPS_FORZADA", "ADICIONAL", "NOTA"]
+
+
+@app.get("/archivos_prestadores.csv")
+def prestadores_csv():
+    df = pd.DataFrame([[d["archivo"], d["dep"], d["mun"], d["reg"], d["ips"], "SI" if d["sin_ips"] else "NO", d["forzada"],
+                        "SI" if d["adicional"] else "NO", d["nota"]]
+                       for d in g.s.prestadores], columns=COLUMNAS_PRESTADORES)
+    datos, mime = a_bytes(df, "csv")
+    return Response(datos, mimetype=mime, headers={"Content-Disposition": "attachment; filename=archivos_por_prestador.csv"})
+
+
+@app.post("/paso/5/prestadores")
+@requiere_paso(5)
+def prestadores_accion():
+    """Cambiar qué archivos se arman por prestador: se descarga la tabla, se edita en Excel y se vuelve a cargar."""
+    s: Sesion = g.s; accion = request.form.get("accion", "")
+    if accion == "restablecer":
+        s.prestadores = C.prestadores_por_defecto(); avisar("ok", "Se restableció la tabla de prestadores inicial.")
+    elif accion == "importar":
+        try:
+            f = request.files.get("csv_prestadores")
+            t, _ = leer_tabla(f.filename, f.read())
+            faltan = [c for c in ("ARCHIVO", "DEPARTAMENTO", "MUNICIPIO", "REGIMEN", "IPS_INCLUIDAS") if c not in t.columns]
+            if faltan:
+                raise ValueError("faltan las columnas " + ", ".join(faltan))
+            col = lambda n: t[n].fillna("").astype(str).str.strip() if n in t.columns else pd.Series("", index=t.index)
+            nuevas = [dict(archivo=a, dep=d.zfill(2), mun=m.zfill(3), reg=(r.upper() or "*"), ips=(i or "*"),
+                           sin_ips=x.upper() in ("SI", "SÍ", "S", "1", "X"), forzada=fz,
+                           adicional=ad.upper() in ("SI", "SÍ", "S", "1", "X"), nota=nt)
+                      for a, d, m, r, i, x, fz, ad, nt in zip(col("ARCHIVO"), col("DEPARTAMENTO"), col("MUNICIPIO"), col("REGIMEN"), col("IPS_INCLUIDAS"),
+                                                              col("INCLUIR_SIN_IPS"), col("IPS_FORZADA"), col("ADICIONAL"), col("NOTA")) if a and d and m]
+            s.prestadores = nuevas; avisar("ok", f"Se cargaron {len(nuevas)} reglas de prestadores.")
+        except Exception as e:
+            avisar("err", f"No se pudo cargar la tabla de prestadores: {e}")
+    return redirect(url_for("paso", n=5) + "#prestadores")
 
 
 # ------------------------------------------------------------------ varios

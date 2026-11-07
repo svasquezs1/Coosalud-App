@@ -48,17 +48,19 @@ Para probar: en el paso 1 suba los cinco archivos de `datos_prueba_ficticios/` (
 ## 2. Uso paso a paso
 | Paso | Qué hace | Botón principal |
 |---|---|---|
-| **1. Cargar archivos** | Sube la base nacional y 1–4 tablas BDUA (Excel o CSV); valida columnas y dice cuál falta; se marcan los estados vigentes y los departamentos (`05,17,27`) | Subir archivos → Continuar al cruce |
-| **2. Cruce con BDUA** | Depura repetidos; muestra cuántos cruzan, cuáles **no** cruzan y qué no vigentes sí aparecen en BDUA. Opción: cruzar solo por número | Ejecutar cruce |
+| **1. Cargar archivos** | Sube la base nacional y 1–4 tablas BDUA (Excel o CSV); valida columnas y dice cuál falta (y deja elegir qué columna del archivo es); la tabla **Nombres de columnas** renombra campos sin tocar el archivo; se marcan los estados vigentes y los departamentos (`05,17,27`) | Subir archivos → Continuar al cruce |
+| **2. Cruce con BDUA** | Depura repetidos; muestra cuántos cruzan, cuáles **no** cruzan y qué no vigentes sí aparecen en BDUA. Llaves a elegir (una, dos o las tres): tipo y número (por defecto), solo número y `AFL_ID_BDUA` | Ejecutar cruce |
 | **3. IPS por municipio** | Compara la IPS de cada afiliado con la regla de su municipio y régimen. Las reglas se agregan, editan, quitan, importan/exportan en CSV | Revisar IPS |
 | **4. Documentos y contactos** | Revisa edad vs. tipo de documento (a una fecha de referencia) y separa a quienes tienen celular/correo válidos | Revisar documentos y contactos |
-| **5. Resumen y descargas** | 9 archivos en Excel o CSV, generados al pulsar el botón | Descargar |
+| **5. Resumen y descargas** | 9 archivos en Excel o CSV, más un archivo por régimen, municipio e IPS (`BD SUBSIDIADO - ABEJORRAL <IPS>`), uno a uno o todos en un ZIP | Descargar |
 
 Siempre disponibles: **Ocultar/Mostrar documentos** (por defecto salen enmascarados) y **Limpiar todos los datos** (púlselo al terminar). Los pasos van en orden y, si cambia algo de un paso, **se borran los resultados de los siguientes** a propósito.
 
 ---
 
 ## 3. Archivos de entrada y salida
+**Nombres de columnas (alias).** Si el nivel nacional cambia un nombre, no hay que tocar el archivo ni el código: en el paso 1, «Nombres de columnas» dice cómo se llama en el archivo y cómo la reconoce la aplicación, o se elige la columna al ver el aviso «Falta X». Los valores iniciales (`CODIGOIPS`→`IPS_ASIGNADA`, `PORTABILIDAD_VIGENTE`→`PORTABILIDAD`, `DIVIPOLA_PORTABILIDAD`→`DANE`, `COD_TIPO_POBLACION`→`TIPO_POBLACION`, etc., tomados del mapeo del cargue a SQL) están en `datos/alias_columnas.csv`; lo que se edite en pantalla dura la sesión y se puede descargar/cargar en CSV. Mayúsculas, minúsculas y espacios no importan, y si el archivo ya trae el nombre de destino no se renombra.
+
 **Base nacional** — obligatorias: `TIPO_IDENTIFICACION`, `NUMERO_IDENTIFICACION`, `ESTADO`, `DEPARTAMENTO`, `PORTABILIDAD`, `DEPARTAMENTO_PORTABILIDAD`, `CIUDAD_PORTABILIDAD`, `REGIMEN`, `IPS_ASIGNADA`, `FECHA_NACIMIENTO`. Opcionales: `CELULAR`, `CORREO_ELECTRONICO` (sin ellas se omite la parte de contactos), `CIUDAD`.
 **Tablas BDUA** (`AFI_BDUA`, `AFI_EPSS42`, `AFI_ESSC24`, `AFI_EPS042`) — obligatorias: `TIPO_IDENTIFICACION`, `NUMERO_IDENTIFICACION`, `ESTADO`. Las columnas extra se ignoran. Hoy se lee **solo la primera hoja** de cada Excel.
 
@@ -72,13 +74,13 @@ Las marcadas **(por confirmar)** deben validarse con Sandra / el Dr. Edwin; **(p
 1. **Vigentes:** estado dentro de los marcados en pantalla. Preseleccionados: `VIGENTE`, `VIGENTE CS`, `COBERTURA INICIAL`, `ACTIVO EN PROCESO DE TRASLADO DE SALIDA`, `VIGENTE - PENDIENTE INICIO COBERTURA RC`, `AC` **(por confirmar)**.
 2. **Alcance:** vigentes cuyo `DEPARTAMENTO` está en la lista, o con `PORTABILIDAD = SI` hacia un departamento de la lista.
 3. **Base depurada:** una fila por persona (`TIPO|NÚMERO`); si está repetida se prefiere la de portabilidad hacia la zona.
-4. **Cruce:** llave `TIPO|NÚMERO` (o solo número) contra las 4 tablas BDUA. *(pendiente: llave `AFL_ID_BDUA`)*.
+4. **Cruce:** llaves a elegir (HU-24), se puede marcar una, dos o las tres: `TIPO|NÚMERO` (por defecto), solo número y `AFL_ID_BDUA`, contra las tablas BDUA. Con varias marcadas, el afiliado cruza si coincide por **cualquiera** de ellas, y la pantalla muestra cuántos coinciden por cada una. Quien no tenga el dato de ninguna llave marcada no cruza y se informa cuántos son. Con `AFL_ID_BDUA`, la columna debe estar en todos los archivos; si falta, se avisa antes de cruzar.
 5. **IPS:** regla = `DEPARTAMENTO + MUNICIPIO + RÉGIMEN` (o `*`) → IPS principal + otras permitidas, usando el **departamento/municipio de portabilidad**. Correcta si la IPS es una permitida; si no, se propone la principal; sin regla → lista con la IPS más frecuente y botón "Crear regla". Aplicar la propuesta trabaja en una copia (`IPS_ORIGINAL`). *(pendiente: portabilidad según el procedimiento SQL, IPS por residencia)*.
 6. **Documentos (reglas iniciales, por confirmar):** CC 18–120 años · TI 7–17 · RC 0–6 · CN máximo 90 días de vida (los CN vencidos pueden salir de la base final). La edad se calcula a la fecha de referencia elegida.
 7. **Contactos:** celular válido = 10 dígitos que empiezan por 3 (se ignora el prefijo 57); correo válido = forma `algo@dominio.ext`. Categorías: ambos · solo celular · solo correo · ninguno.
 8. **Pendientes de la reunión con Sandra:** sincronización (añadir activos / eliminar inactivos), identificación de personas especiales CIDH (`TIPO_POBLACION = 9-CIDH`) antes de documentos y contactos, y exportables por municipio y por `CODIGOIPS`.
 
-Las reglas de IPS y de documento por defecto están en `datos/reglas_ips.csv` (66 reglas) y `datos/reglas_documento.csv`: son **datos editables, no código**.
+Las reglas de IPS y de documento por defecto están en `datos/reglas_ips.csv` (67 reglas; incluye 05-042 Santa Fe de Antioquia, que aparece en las consultas por municipio del área) y `datos/reglas_documento.csv`: son **datos editables, no código**.
 
 ---
 
@@ -98,10 +100,11 @@ flowchart LR
 | `cruce/lectura.py` | Excel/CSV en memoria → tabla de texto con encabezados en MAYÚSCULAS | Decidir qué columnas importan |
 | `cruce/exportar.py` | Tabla → bytes `.xlsx`/`.csv` en memoria | Escribir a disco |
 | `cruce/sesion.py` | Estado por persona en memoria, vence a los 30 min, borra en cascada | Conocer HTTP |
-| `cruce/config.py` | Constantes y carga de reglas por defecto | Tener reglas incrustadas |
+| `cruce/municipios.py` | Agrupa la base final por régimen, municipio e IPS y arma los archivos por prestador (nombres de archivo) | Leer o escribir archivos |
+| `cruce/config.py` | Constantes y carga de reglas y alias por defecto | Tener reglas incrustadas |
 | `servidor.py` | Arranque con waitress y variables de entorno | Tener rutas |
 | `templates/` `static/` | Pantallas en HTML + CSS, **sin JavaScript** | Calcular nada |
-| `tests/` | 18 pruebas con datos ficticios | Usar datos reales |
+| `tests/` | 29 pruebas con datos ficticios | Usar datos reales |
 
 **Decisiones clave y por qué**
 - *Flask + HTML en el servidor, sin JS:* lo usa una analista desde el navegador sin instalar nada; menos piezas y más fácil de asegurar con un equipo de tres.
@@ -160,7 +163,7 @@ flowchart LR
 
 ## 8. Pruebas
 ```bash
-python -m pytest              # 18 pruebas (~10 s)
+python -m pytest              # 29 pruebas (~12 s)
 python -m pytest -k ips       # solo las de IPS
 ```
 `tests/test_cruce.py` prueba la **lógica** directamente (cruce, IPS, documentos, celulares, vencimiento de sesiones, regresión de columnas) y `tests/test_web.py` recorre los **5 pasos** con el cliente de Flask (pasos bloqueados en orden, máscara, cabeceras, que **no queden archivos temporales**, 4 descargas × 2 formatos, reglas, clave, archivo dañado, CSV con columnas faltantes). Las cifras esperadas (654 filas, 522 en la base, 492 cruzan, 350 IPS correctas, 65 por corregir, 517 en la base final…) salen de un cálculo independiente sobre los datos ficticios.
@@ -206,8 +209,8 @@ Responsables propuestos: **DAT** Sebastián (datos y reglas) · **WEB** Santiago
 |---|---|---|---|
 | HU-16 | Que los municipios sin regla de IPS se asignen según el municipio de residencia del afiliado | 5 | ⬜ Por hacer |
 | HU-17 | Probar la aplicación con una muestra de mis propios datos en mi equipo y reportar diferencias | 3 | ⬜ Por hacer |
-| HU-24 | Elegir con qué llave se hace el cruce (AFL_ID_BDUA, tipo y número de documento, o solo el número) | 3 | ⬜ Por hacer |
-| HU-25 | Que la IPS de los afiliados con portabilidad se asigne según el municipio al que se trasladaron, como lo hace hoy el procedimiento de actualización de IPS_ASIGNADA | 5 | ⬜ Por hacer |
+| HU-24 | Elegir con qué llave o llaves se hace el cruce (AFL_ID_BDUA, tipo y número de documento, solo el número, o varias a la vez) | 3 | 🟡 En revisión (probada con datos ficticios; falta validar con Sandra) |
+| HU-25 | Que la IPS de los afiliados con portabilidad se asigne según el municipio al que se trasladaron, como lo hace hoy el procedimiento de actualización de IPS_ASIGNADA | 5 | 🟡 En revisión (las reglas de `datos/reglas_ips.csv` son las del procedimiento actual; falta probarlas con Sandra) |
 | HU-26 | Que los afiliados activos se añadan a la base depurada y que los que no estén activos se eliminen | 5 | ⬜ Por hacer |
 | HU-27 | Identificar a las personas especiales (población CIDH) al final del proceso y antes de documentos y contactos | 5 | ⬜ Por hacer |
 
@@ -219,8 +222,9 @@ Responsables propuestos: **DAT** Sebastián (datos y reglas) · **WEB** Santiago
 | HU-10 | Separar a quienes tienen celular y correo válidos | 5 | 🟡 En revisión |
 | HU-11 | Un resumen del ciclo con indicadores | 3 | 🟡 En revisión |
 | HU-18 | Abrir la aplicación desde mi equipo con el navegador, escribiendo la dirección del servidor | 5 | ⬜ Por hacer |
-| HU-28 | Descargar la base por municipio y, dentro de cada uno, por código de IPS asignada (CODIGOIPS) | 5 | ⬜ Por hacer |
-| HU-29 | Ver todos los municipios y, dentro de cada uno, todos los archivos que se pueden descargar y compartir | 3 | ⬜ Por hacer |
+| HU-28 | Descargar la base por municipio y, dentro de cada uno, por código de IPS asignada (CODIGOIPS) | 5 | 🟡 En revisión (archivos por prestador y servicio según las consultas del área; falta confirmar nombres y columnas con Sandra) |
+| HU-29 | Ver todos los municipios y, dentro de cada uno, todos los archivos que se pueden descargar y compartir | 3 | 🟡 En revisión |
+| HU-30 | Renombrar columnas desde la pantalla cuando el nivel nacional cambie sus nombres (pedido por Sandra) | 3 | 🟡 En revisión |
 
 **Sprint 4 - Seguridad y acceso, lectura de SQL Server, manual y entrega final** — 28 puntos
 
@@ -271,3 +275,22 @@ Después: invitar a los compañeros (*Settings → Collaborators*) y a las profe
 
 ## Glosario
 **EPS** entidad promotora de salud · **IPS** institución prestadora (código en `IPS_ASIGNADA`) · **BDUA** base de datos única de afiliados · **Vigente** afiliación activa según el estado · **Portabilidad** atención en un municipio distinto al de afiliación · **CIDH** población especial `9-CIDH` · **CODIGOIPS** código de la IPS asignada · **CC / TI / RC / CN** cédula / tarjeta de identidad / registro civil / certificado de nacido vivo · **HU-xx** historia de usuario xx · **Función pura** función cuyo resultado depende solo de sus parámetros.
+
+
+## Archivos por prestador (HU-28)
+
+Las consultas del área no arman un archivo por código de IPS, sino por **prestador y servicio** (por ejemplo «Recuperación», «P Y M»,
+«Droguería»). Algunos incluyen a todo el régimen contributivo, otros a los afiliados sin IPS y Promedan cambia la IPS.
+Esa lógica está en `datos/archivos_prestadores.csv` (Caucasia, El Bagre, Nechí, Quibdó, Zaragoza y Promedan) y se puede cambiar
+desde el paso 5 («Archivos por prestador: cambiar la tabla»): se descarga, se edita en Excel y se vuelve a cargar.
+
+| Columna | Qué significa |
+|---|---|
+| `ARCHIVO` | Nombre del archivo. Varias filas con el mismo nombre se suman (sin repetir afiliados). |
+| `DEPARTAMENTO`, `MUNICIPIO`, `REGIMEN` | De portabilidad, como en las consultas. Régimen `*` = los dos. |
+| `IPS_INCLUIDAS` | Códigos de IPS separados por `;`, o `*` para cualquiera. |
+| `INCLUIR_SIN_IPS` | `SI` = entran también los que no tienen IPS. |
+| `IPS_FORZADA` | Si se llena, el archivo sale con esa IPS (Promedan). |
+| `ADICIONAL` | `SI` = se entrega además de los archivos por municipio e IPS; `NO` = los reemplaza en ese régimen y municipio. |
+
+Un afiliado puede estar en más de un archivo (igual que hoy), pero nunca dos veces en el mismo.

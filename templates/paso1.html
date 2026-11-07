@@ -1,4 +1,12 @@
-{% extends "base.html" %}{% block contenido %}
+{% extends "base.html" %}
+{% macro asignar(falta, opciones) %}
+<form method="post" action="{{ url_for('alias_columnas') }}" class="row ayuda">
+  <input type="hidden" name="accion" value="asignar"><input type="hidden" name="falta" value="{{ falta }}">
+  <span>Falta <b>{{ falta }}</b>. ¿Cuál columna de su archivo es?</span>
+  <select name="columna" aria-label="Columna de su archivo para {{ falta }}">{% for o in opciones %}<option>{{ o }}</option>{% endfor %}</select>
+  <button class="mini" type="submit" {{ '' if opciones else 'disabled' }}>Usar esta columna</button>
+</form>{% endmacro %}
+{% block contenido %}
 <h2>1. Cargar archivos</h2>
 <p class="lead">Suba la base que envía el nivel nacional y las tablas BDUA del mes. Acepta Excel (.xlsx) y CSV. Los procesos siguen en orden: primero el cruce, luego la IPS y al final los contactos.</p>
 <form method="post" action="{{ url_for('subir') }}" enctype="multipart/form-data">
@@ -18,6 +26,7 @@
       <form method="post" action="{{ url_for('quitar') }}"><input type="hidden" name="que" value="nac"><button class="mini" type="submit">Quitar</button></form></div>
     <div class="chips">{% if nac_falt %}<span class="chip bad">Faltan columnas: {{ nac_falt|join(', ') }}</span>{% else %}<span class="chip ok">Columnas requeridas completas</span>{% endif %}
     {% if nac_opc %}<span class="chip warn">Sin {{ nac_opc|join(', ') }}: no se podrá revisar contactos</span>{% endif %}</div>
+    {% for f in nac_falt %}{{ asignar(f, sug_nac[f]) }}{% endfor %}
   {% endif %}
   </div>
   <div>
@@ -25,9 +34,30 @@
     <div class="file"><span>{{ nombre }} · {{ fmt(t|length) }} filas
       {% if bdua_falt[nombre] %}<span class="chip bad">faltan: {{ bdua_falt[nombre]|join(', ') }}</span>{% else %}<span class="chip ok">ok</span>{% endif %}</span>
       <form method="post" action="{{ url_for('quitar') }}"><input type="hidden" name="que" value="bdua:{{ nombre }}"><button class="mini" type="submit">Quitar</button></form></div>
+    {% for f in bdua_falt[nombre] %}{{ asignar(f, sug_bdua[nombre][f]) }}{% endfor %}
   {% endfor %}
   </div>
 </div>
+
+<details id="alias" style="margin-top:14px" open><summary><b>Nombres de columnas</b> <span class="muted">· si el nivel nacional cambia el nombre de una columna</span></summary>
+<p class="muted">Cada fila dice cómo se llama la columna en el archivo y cómo la reconoce la aplicación. No hace falta tocar el archivo: agregue o cambie una fila y los archivos ya cargados se actualizan solos. Mayúsculas, minúsculas y espacios no importan.</p>
+<form method="post" action="{{ url_for('alias_columnas') }}" enctype="multipart/form-data">
+<button type="submit" name="accion" value="guardar" class="sr" tabindex="-1" aria-hidden="true"></button>
+<div class="row" style="margin-bottom:8px">
+  <button class="mini" name="accion" value="agregar" type="submit">+ Agregar nombre</button>
+  <button class="mini" name="accion" value="guardar" type="submit">Guardar cambios</button>
+  <a class="mini" href="{{ url_for('alias_csv') }}" style="text-decoration:none;padding:3px 9px">Descargar (CSV)</a>
+  <input type="file" name="csv_alias" accept=".csv"><button class="mini" name="accion" value="importar" type="submit">Cargar (CSV)</button>
+  <button class="mini" name="accion" value="restablecer" type="submit">Volver a los iniciales</button>
+</div>
+<div class="tw" style="max-height:240px"><table>
+<thead><tr><th>Nombre en el archivo</th><th>Nombre que usa la aplicación</th><th></th></tr></thead>
+<tbody>{% for a in s.alias %}<tr>
+<td><input type="text" name="al_origen" value="{{ a.origen }}" size="28" aria-label="Nombre en el archivo"></td>
+<td><input type="text" name="al_destino" value="{{ a.destino }}" size="28" aria-label="Nombre que usa la aplicación"></td>
+<td><button class="mini" name="accion" value="quitar:{{ loop.index0 }}" type="submit">Quitar</button></td></tr>{% endfor %}</tbody></table></div>
+<p class="muted">La aplicación necesita estas columnas: {{ req_nac|join(', ') }}. Para el cruce con otra llave también puede usar AFL_ID_BDUA.</p>
+</form></details>
 
 {% if s.nac is not none %}
 <form method="post" action="{{ url_for('continuar_1') }}">

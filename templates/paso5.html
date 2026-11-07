@@ -11,5 +11,27 @@
   <div class="dl" style="margin-top:10px">{% for clave, (nombre, _f, cuantos) in descargas.items() %}
     <button class="btn sec" name="clave" value="{{ clave }}" type="submit" {{ '' if cuantos else 'disabled' }}><span>{{ nombre }}</span><span>{{ fmt(cuantos) }}</span></button>{% endfor %}</div>
 </form>
+<h3>Archivos por municipio e IPS</h3>
+<p class="muted">Un archivo por régimen, municipio e IPS asignada, con el nombre «BD &lt;régimen&gt; - &lt;municipio&gt; &lt;IPS&gt;». En los municipios con varios prestadores (Caucasia, El Bagre, Nechí, Quibdó, Zaragoza y Promedan) los archivos salen por prestador y servicio, como en las consultas del área; un afiliado puede estar en más de un archivo. Use el botón de cada archivo o descargue todo en un ZIP (una carpeta por municipio). Si la base no trae el nombre de la IPS, se usa su código.</p>
+{% if municipios %}
+<form method="get" action="{{ url_for('descargar_zip') }}" class="row">
+  <label class="row">Formato <select name="formato"><option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV</option></select></label>
+  <button class="btn" type="submit">Descargar todo (ZIP)</button>
+  <span class="muted">{{ fmt(municipios|length) }} municipios · {{ fmt(n_archivos) }} archivos</span>
+</form>
+{% for m in municipios %}
+<details class="mun"><summary>{{ m.nombre }} <span class="muted">· {{ fmt(m.afiliados) }} afiliado{{ '' if m.afiliados == 1 else 's' }} · {{ m.archivos|length }} archivo{{ '' if m.archivos|length == 1 else 's' }}</span></summary>
+  {% for a in m.archivos %}<div class="file"><span>{{ a.nombre }} <span class="muted">({{ fmt(a.afiliados) }})</span></span>
+    <span class="row"><a class="mini" style="text-decoration:none;padding:3px 9px" href="{{ url_for(a.ruta, formato='xlsx', **a.params) }}">Excel</a>
+    <a class="mini" style="text-decoration:none;padding:3px 9px" href="{{ url_for(a.ruta, formato='csv', **a.params) }}">CSV</a></span></div>{% endfor %}
+</details>{% endfor %}
+{% else %}<p class="muted">Sin afiliados en la base final.</p>{% endif %}
+<details id="prestadores" class="mun" style="margin-top:14px"><summary>Archivos por prestador: cambiar la tabla <span class="muted">· {{ fmt(s.prestadores|length) }} reglas</span></summary>
+<p class="muted">Cada fila dice qué afiliados entran a un archivo: municipio, régimen (o *), IPS incluidas (códigos separados por «;», o *), si entran los que no tienen IPS, si la IPS se cambia en el archivo (IPS_FORZADA) y si el archivo es ADICIONAL (se entrega además de los de municipio e IPS, como Promedan). Varias filas con el mismo nombre de archivo se suman. Descargue la tabla, edítela en Excel y vuelva a cargarla.</p>
+<form method="post" action="{{ url_for('prestadores_accion') }}" enctype="multipart/form-data" class="row">
+  <a class="mini" href="{{ url_for('prestadores_csv') }}" style="text-decoration:none;padding:3px 9px">Descargar (CSV)</a>
+  <input type="file" name="csv_prestadores" accept=".csv"><button class="mini" name="accion" value="importar" type="submit">Cargar (CSV)</button>
+  <button class="mini" name="accion" value="restablecer" type="submit">Volver a la inicial</button>
+</form></details>
 <div class="row" style="margin-top:20px"><a class="btn sec" href="{{ url_for('paso', n=4) }}">Atrás</a></div>
 {% endblock %}
