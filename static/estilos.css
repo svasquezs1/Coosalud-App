@@ -26,7 +26,8 @@ p.lead{color:var(--muted);margin:0 0 16px}
 .box{border:1px dashed var(--line);border-radius:12px;padding:14px;background:var(--bg)}
 .box label.t{display:block;font-weight:600;margin-bottom:6px}
 input[type=file]{width:100%;font:inherit;font-size:13px}
-input[type=text],input[type=date],input[type=number],select{font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);max-width:100%}
+.box input[type=text],.box input[type=password]{width:100%;box-sizing:border-box}
+input[type=text],input[type=password],input[type=date],input[type=number],select{font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);max-width:100%}
 .btn{font:inherit;font-size:14px;border-radius:9px;padding:9px 16px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);cursor:pointer}
 .btn.sec{background:transparent;color:var(--accent)}
 .btn.danger{border-color:var(--bad);color:var(--bad);background:transparent}

@@ -101,10 +101,12 @@ flowchart LR
 | `cruce/exportar.py` | Tabla → bytes `.xlsx`/`.csv` en memoria | Escribir a disco |
 | `cruce/sesion.py` | Estado por persona en memoria, vence a los 30 min, borra en cascada | Conocer HTTP |
 | `cruce/municipios.py` | Agrupa la base final por régimen, municipio e IPS y arma los archivos por prestador (nombres de archivo) | Leer o escribir archivos |
+| `cruce/sqlserver.py` | Lectura de tablas desde SQL Server (solo SELECT, nombres validados) → la misma tabla de texto que un archivo | Conocer Flask ni guardar claves |
+| `cruce/acceso.py` | Quién usa la app: usuario del equipo, clave compartida o usuario de Windows | Conocer las rutas |
 | `cruce/config.py` | Constantes y carga de reglas y alias por defecto | Tener reglas incrustadas |
 | `servidor.py` | Arranque con waitress y variables de entorno | Tener rutas |
 | `templates/` `static/` | Pantallas en HTML + CSS, **sin JavaScript** | Calcular nada |
-| `tests/` | 29 pruebas con datos ficticios | Usar datos reales |
+| `tests/` | 43 pruebas con datos ficticios | Usar datos reales |
 
 **Decisiones clave y por qué**
 - *Flask + HTML en el servidor, sin JS:* lo usa una analista desde el navegador sin instalar nada; menos piezas y más fácil de asegurar con un equipo de tres.
@@ -153,17 +155,18 @@ flowchart LR
 ## 7. Seguridad y privacidad
 - **Sin persistencia:** los archivos subidos se leen en memoria (no se crean temporales), el estado vive en la sesión de cada persona y se borra con *Limpiar*, a los **30 minutos sin uso** o al apagar. Lo descargado se genera al momento.
 - **Cabeceras:** CSP `default-src 'none'` (sin scripts ni recursos externos), `Cache-Control: no-store`, `nosniff`, `Referrer-Policy: no-referrer`. Cookie `sid` `HttpOnly` + `SameSite=Strict`.
-- **Acceso:** escucha solo en `127.0.0.1` por defecto; si se abre a la red, **definir `CRUCE_CLAVE`**. Sin HTTPS los datos viajan sin cifrar por la red interna → TI debe poner HTTPS delante.
+- **Acceso:** escucha solo en `127.0.0.1` por defecto; si se abre a la red, **definir `CRUCE_CLAVE`** o usar el usuario de Windows (sección 9). Sin HTTPS los datos viajan sin cifrar por la red interna → TI debe poner HTTPS delante.
 - **Documentos enmascarados** en pantalla (`12••••••89`).
 - **Repositorio:** `.gitignore` bloquea `.xlsx`, `.csv`, `.sql`, `.zip`, `.env`, `.pem`; solo se permiten `datos/*.csv` (reglas) y `datos_prueba_ficticios/*.xlsx` (inventados: documentos que empiezan por 9000/8000 y apellido `FICTICIO`). Antes de cada push: `git status` y revisar qué se sube.
 - Si se sube algo sensible por error: avisar de inmediato, no apilar commits, limpiar el historial (`git filter-repo`), rotar secretos e informar a Coosalud.
-- **Pendiente:** usuarios con hash y roles, HTTPS, límites de memoria, registro de uso sin datos personales.
+- **Claves de SQL:** nunca se guardan en la sesión ni en disco, ni se muestran; con autenticación de Windows no hay clave. Los nombres de bases y tablas se validan (solo letras, números y `_`) y las tablas se eligen de las que el servidor listó.
+- **Pendiente:** roles por usuario, HTTPS, límites de memoria, registro de uso sin datos personales.
 
 ---
 
 ## 8. Pruebas
 ```bash
-python -m pytest              # 29 pruebas (~12 s)
+python -m pytest              # 43 pruebas (~25 s)
 python -m pytest -k ips       # solo las de IPS
 ```
 `tests/test_cruce.py` prueba la **lógica** directamente (cruce, IPS, documentos, celulares, vencimiento de sesiones, regresión de columnas) y `tests/test_web.py` recorre los **5 pasos** con el cliente de Flask (pasos bloqueados en orden, máscara, cabeceras, que **no queden archivos temporales**, 4 descargas × 2 formatos, reglas, clave, archivo dañado, CSV con columnas faltantes). Las cifras esperadas (654 filas, 522 en la base, 492 cruzan, 350 IPS correctas, 65 por corregir, 517 en la base final…) salen de un cálculo independiente sobre los datos ficticios.
@@ -179,6 +182,38 @@ Objetivo: la analista abre `https://servidor-interno:puerto` desde su equipo, si
 
 | Variable | Por defecto | Uso |
 |---|---|---|
+| `CRUCE_HOST` | `127.0.0.1` | `0.0.0.0` abre a toda la red (solo con clave) |
+| `CRUCE_PUERTO` | `8080` | Puerto |
+| `CRUCE_USUARIO` / `CRUCE_CLAVE` | `cruce` / vacío | Con clave, la app pide usuario y clave |
+| `CRUCE_AUTH_WINDOWS` | vacío | `1` = el usuario lo informa el servidor web de la empresa (ver abajo) |
+| `CRUCE_CABECERA_USUARIO` | `X-Remote-User` | Cabecera con el usuario (también se lee `REMOTE_USER`) |
+| `CRUCE_PROXY_IPS` | `127.0.0.1,::1` | De dónde se acepta esa cabecera (el servidor web de adelante) |
+| `CRUCE_USUARIOS_PERMITIDOS` | vacío (todos) | Lista separada por comas, p. ej. `scarvajal,ehoyos` |
+| `CRUCE_SQL_SERVIDOR` | vacío | Servidor SQL que propone la pantalla del paso 1 |
+| `CRUCE_SQL_BASE_NACIONAL` / `CRUCE_SQL_BASE_BDUA` | `SALUS` / `BDUA` | Bases donde están `BD_SINERGIA_ddmmaaaa` y `AFI_*_aaaa_mm` |
+| `CRUCE_SQL_PATRON_NACIONAL` / `CRUCE_SQL_PATRON_BDUA` | `BD[_]SINERGIA%` / `AFI[_]%` | Qué tablas se listan (patrón `LIKE`) |
+| `CRUCE_SQL_USUARIO` / `CRUCE_SQL_CLAVE` | vacío | Solo si no se usa autenticación de Windows |
+| `CRUCE_SQL_DRIVER` | `ODBC Driver 18 for SQL Server` | Nombre del controlador instalado |
+| `CRUCE_SQL_CONFIAR_CERTIFICADO` | vacío | `1` solo si TI lo indica (certificado interno sin cadena de confianza) |
+
+### Entrada con el usuario de Windows (HU-19)
+La aplicación no autentica a nadie por sí sola: lo hace un servidor web de la empresa y la aplicación solo lee el resultado.
+1. La app corre solo en local: `CRUCE_HOST=127.0.0.1`, `CRUCE_AUTH_WINDOWS=1` y, si se quiere limitar, `CRUCE_USUARIOS_PERMITIDOS`.
+2. En el mismo servidor, **IIS** con *Autenticación de Windows* activa y *Application Request Routing* / *URL Rewrite* reenvía a `http://127.0.0.1:8080` y copia `LOGON_USER` en la cabecera `X-Remote-User` (variable de servidor `HTTP_X_REMOTE_USER`). Ahí mismo se pone el HTTPS.
+3. La app acepta la cabecera **solo si la petición viene de `CRUCE_PROXY_IPS`**: quien llegue directo desde la red no puede decir quién es (recibe 401). Si el usuario no está en la lista, 403.
+4. Se admite `EMPRESA\usuario` y `usuario@empresa.com`; se muestra `usuario` arriba a la derecha. Cada sesión queda atada a su usuario: otra persona con la misma cookie obtiene una sesión nueva.
+5. **No probado contra el IIS real de Coosalud** (no hubo acceso): validar en el servidor con una prueba de 401 sin cabecera, 200 con usuario y 403 con un usuario no permitido.
+Sin esto, en el propio equipo (127.0.0.1) no se pide nada y se muestra el usuario del equipo.
+
+### Lectura desde SQL Server (HU-12)
+Paso 1 → «Leer directamente desde SQL Server». Pasos: **Buscar tablas** (lista las `BD_SINERGIA_*` de la base nacional y las `AFI_*` de BDUA y deja marcadas las más recientes) → **Leer tablas**. Lo leído entra por el mismo camino que un archivo subido (alias de columnas, cruce, IPS…), y no se escribe nada en disco.
+- **Instalación (una vez por equipo):** `pip install -r requirements-sql.txt` y el controlador *ODBC Driver 18 for SQL Server* de Microsoft. Sin ellos la pantalla avisa y se siguen usando archivos.
+- **Credenciales:** si el usuario de SQL se deja vacío, se usa la autenticación integrada de Windows (`Trusted_Connection=yes`): es el usuario con el que corre la aplicación, así que quien la abre en su equipo no escribe nada. TI debe darle **solo lectura** sobre las bases `SALUS` y `BDUA`. Con un usuario de SQL, la clave se pide en cada lectura y no se guarda.
+- Solo se ejecutan `SELECT * FROM [base].[esquema].[tabla]` y la consulta al catálogo `INFORMATION_SCHEMA.TABLES`; la conexión se abre con `ApplicationIntent=ReadOnly`.
+- **No probado contra el SQL Server real** (no hubo acceso). Las pruebas usan una base SQLite en memoria que imita al servidor. Antes de usarlo: probar con una tabla pequeña y comparar contra los archivos (mismo número de filas y misma cifra de cruce).
+- Si la aplicación corre como servicio, «su usuario de Windows» es el de la cuenta del servicio, no el de cada persona: en ese caso conviene una cuenta de servicio de solo lectura.
+
+---|---|---|
 | `CRUCE_HOST` | `127.0.0.1` | `0.0.0.0` abre a toda la red (solo con clave) |
 | `CRUCE_PUERTO` | `8080` | Puerto |
 | `CRUCE_USUARIO` / `CRUCE_CLAVE` | `cruce` / vacío | Con clave, la app pide usuario y clave |
@@ -230,11 +265,11 @@ Responsables propuestos: **DAT** Sebastián (datos y reglas) · **WEB** Santiago
 
 | ID | Historia | Pts | Estado |
 |---|---|---|---|
-| HU-19 | Que cada persona entre con su propio usuario y clave | 5 | ⬜ Por hacer |
+| HU-19 | Que cada persona entre con su propio usuario y clave | 5 | 🟡 En revisión (usuario de Windows vía IIS construido y probado con pruebas automáticas; falta validarlo en el servidor de Coosalud) |
 | HU-20 | Que la conexión al servidor sea cifrada (https) | 3 | ⬜ Por hacer |
 | HU-21 | Que dos o más analistas trabajen al tiempo sin que se mezclen sus datos y sin que el servidor se quede sin memoria | 3 | ⬜ Por hacer |
 | HU-14 | Un registro de quién ejecutó cada cruce, cuándo y con qué totales, sin guardar datos personales | 3 | ⬜ Por hacer |
-| HU-12 | Que la aplicación lea la tabla interna de afiliados desde SQL Server | 8 | ⬜ Por hacer |
+| HU-12 | Que la aplicación lea la tabla interna de afiliados desde SQL Server | 8 | 🟡 En revisión (construida con autenticación de Windows; probada con una base simulada; falta probarla contra el servidor real) |
 | HU-22 | Un manual con pantallas y una capacitación | 3 | ⬜ Por hacer |
 | HU-23 | Ver un ciclo completo en el servidor de la empresa y aceptar formalmente el producto | 3 | ⬜ Por hacer |
 

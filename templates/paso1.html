@@ -19,6 +19,40 @@
 <div class="row" style="margin-top:12px"><button class="btn sec" type="submit">Subir archivos</button><span class="muted">Puede subir primero un grupo y luego otro.</span></div>
 </form>
 
+<details id="sql" class="mun" {{ 'open' if s.sql }}><summary><b>Leer directamente desde SQL Server</b> <span class="muted">· sin subir archivos</span></summary>
+{% if not sql_ok %}<p class="muted">Este equipo no tiene el componente de conexión (pyodbc y el controlador ODBC de SQL Server). Pida a TI instalarlo con la sección «Lectura desde SQL Server» del README; mientras tanto puede subir los archivos.</p>{% endif %}
+{% if not s.sql %}
+<p class="muted">Si deja vacíos el usuario y la clave de SQL, se usa su usuario de Windows: no escribe credenciales. Las tablas cambian cada mes, así que primero se buscan las que hay.</p>
+<form method="post" action="{{ url_for('sql_accion') }}">
+  <input type="hidden" name="accion" value="buscar">
+  <div class="grid g2">
+    <div class="box"><label class="t" for="sql_servidor">Servidor</label><input type="text" id="sql_servidor" name="servidor" value="{{ sql_def.servidor }}" required></div>
+    <div class="box"><label class="t" for="sql_base_nac">Base de datos de la base nacional</label><input type="text" id="sql_base_nac" name="base_nac" value="{{ sql_def.base_nac }}"></div>
+    <div class="box"><label class="t" for="sql_base_bdua">Base de datos de las tablas BDUA</label><input type="text" id="sql_base_bdua" name="base_bdua" value="{{ sql_def.base_bdua }}"></div>
+    <div class="box"><label class="t" for="sql_usuario">Usuario de SQL (solo si no usa Windows)</label><input type="text" id="sql_usuario" name="usuario" value="{{ sql_def.usuario }}" autocomplete="off">
+      <label class="t" for="sql_clave" style="margin-top:8px">Clave de SQL</label><input type="password" id="sql_clave" name="clave" autocomplete="off"></div>
+  </div>
+  <div class="row" style="margin-top:10px"><label class="row"><input type="checkbox" name="confiar"> Confiar en el certificado del servidor (solo si TI lo indica)</label>
+    <button class="btn sec" type="submit" {{ '' if sql_ok else 'disabled' }}>Buscar tablas</button></div>
+</form>
+{% else %}
+<p class="muted">Servidor <b>{{ s.sql.servidor }}</b> · {{ s.sql.base_nac }} y {{ s.sql.base_bdua }} · {{ ('usuario de SQL ' ~ s.sql.usuario) if s.sql.usuario else 'su usuario de Windows' }}. Ya están elegidas las tablas más recientes.</p>
+<form method="post" action="{{ url_for('sql_accion') }}">
+  <input type="hidden" name="accion" value="leer">
+  <div class="grid g2">
+    <div class="box"><label class="t" for="sql_tabla_nac">Base del nivel nacional</label>
+      <select id="sql_tabla_nac" name="tabla_nac">{% for t in s.sql.nac %}<option value="{{ t }}" {{ 'selected' if t in s.sql.sug_nac }}>{{ t.partition('.')[2] }}</option>{% endfor %}</select></div>
+    <div class="box"><span class="t" style="display:block;font-weight:600;margin-bottom:6px">Tablas BDUA</span>
+      <div class="estados">{% for t in s.sql.bdua %}<label><input type="checkbox" name="tabla_bdua" value="{{ t }}" {{ 'checked' if t in s.sql.sug_bdua }}> {{ t.partition('.')[2] }}</label>{% endfor %}</div></div>
+  </div>
+  {% if s.sql.usuario %}<div class="box" style="margin-top:10px"><label class="t" for="sql_clave2">Clave de SQL (no se guarda)</label><input type="password" id="sql_clave2" name="clave" autocomplete="off"></div>{% endif %}
+  <div class="row" style="margin-top:10px"><button class="btn sec" type="submit">Leer tablas</button>
+    <span class="muted">Puede tardar unos minutos con la base completa.</span></div>
+</form>
+<form method="post" action="{{ url_for('sql_accion') }}" style="margin-top:8px"><input type="hidden" name="accion" value="restablecer"><button class="mini" type="submit">Cambiar la conexión</button></form>
+{% endif %}
+</details>
+
 <div class="grid g2" style="margin-top:6px">
   <div>
   {% if s.nac is not none %}

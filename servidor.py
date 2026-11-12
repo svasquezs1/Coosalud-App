@@ -8,6 +8,9 @@ def iniciar(app):
     puerto = int(os.environ.get("CRUCE_PUERTO", "8080"))
     if host != "127.0.0.1" and not os.environ.get("CRUCE_CLAVE"):
         print("ATENCIÓN: el servidor está abierto a la red y no tiene clave. Defina CRUCE_CLAVE.")
+    if os.environ.get("CRUCE_AUTH_WINDOWS", "").strip().lower() in ("1", "si", "sí", "true", "yes") and host != "127.0.0.1":
+        print("ATENCIÓN: con CRUCE_AUTH_WINDOWS lo seguro es CRUCE_HOST=127.0.0.1 y el servidor web de la empresa (IIS) delante; "
+              "solo se acepta el usuario si la petición viene de CRUCE_PROXY_IPS.")
     print(f"Cruce de afiliados en http://{host if host != '0.0.0.0' else 'localhost'}:{puerto}  (Ctrl+C para cerrar)")
     try:
         from waitress import serve

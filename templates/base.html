@@ -10,6 +10,7 @@
 <header class="top"><div class="wrap">
   <div><h1>Cruce de afiliados contra BDUA</h1><p class="sub">Sprint 1 · Cruce, IPS por municipio, documentos y contactos</p></div>
   <div class="row">
+    {% if usuario %}<span class="chip" title="Usuario con el que está usando la aplicación">Usuario: {{ usuario }}</span>{% endif %}
     <form method="post" action="{{ url_for('alternar_mascara') }}"><button class="mini" type="submit">{{ 'Mostrar documentos completos' if s.ocultar_docs else 'Ocultar documentos en pantalla' }}</button></form>
     <form method="post" action="{{ url_for('limpiar') }}"><button class="btn danger" type="submit">Limpiar todos los datos</button></form>
   </div>

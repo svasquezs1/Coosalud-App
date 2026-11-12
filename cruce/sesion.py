@@ -31,6 +31,8 @@ class Sesion:
     llaves: list = field(default_factory=lambda: ["tipo_numero"])
     reglas_ips: list = field(default_factory=C.reglas_ips_por_defecto)
     aplicar_ips: bool = True
+    usuario: str = ""                                  # quién abrió la sesión (con acceso por usuario de Windows)
+    sql: dict = field(default_factory=dict)             # tablas encontradas en SQL Server (nunca la clave)
     prestadores: list = field(default_factory=C.prestadores_por_defecto)
     reglas_doc: list = field(default_factory=C.reglas_documento_por_defecto)
     fecha_ref: str = ""

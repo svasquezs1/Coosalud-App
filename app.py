@@ -17,6 +17,8 @@ from cruce import config as C
 from cruce import proceso as P
 from cruce.exportar import a_bytes
 from cruce import municipios as M
+from cruce import sqlserver as S
+from cruce.acceso import Acceso, usuario_del_equipo, usuario_remoto
 from cruce.lectura import clave_columna, columnas_faltantes, leer_tabla, nombres_efectivos, renombrar
 from cruce.sesion import Almacen, Sesion
 
@@ -35,6 +37,9 @@ app.request_class = PeticionEnMemoria
 app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024 * 1024        # 1 GB por envío
 almacen = Almacen()
 USUARIO, CLAVE = os.environ.get("CRUCE_USUARIO", "cruce"), os.environ.get("CRUCE_CLAVE", "")
+ACCESO = Acceso.desde_entorno()
+# Si la aplicación solo escucha en este equipo, quien la usa es quien la abrió: se muestra el usuario del equipo.
+USUARIO_LOCAL = usuario_del_equipo() if os.environ.get("CRUCE_HOST", "127.0.0.1") == "127.0.0.1" else None
 
 PASOS = [(1, "Cargar archivos"), (2, "Cruce con BDUA"), (3, "IPS por municipio"), (4, "Documentos y contactos"), (5, "Resumen y descargas")]
 
@@ -42,11 +47,24 @@ PASOS = [(1, "Cargar archivos"), (2, "Cruce con BDUA"), (3, "IPS por municipio")
 # ------------------------------------------------------------------ sesión, acceso y cabeceras
 @app.before_request
 def antes():
-    if CLAVE:  # acceso opcional con usuario y clave (recomendado si el servidor se abre a la red de la empresa)
+    usuario = USUARIO_LOCAL
+    if ACCESO.windows:   # el servidor web de la empresa autentica con Windows y nos dice quién es
+        usuario = usuario_remoto(ACCESO, request.remote_addr, request.headers, request.environ)
+        if not usuario:
+            return Response("Acceso restringido: no se recibió el usuario de Windows. Abra la aplicación por la dirección de la empresa.", 401)
+        if not ACCESO.permite(usuario):
+            return Response("Su usuario no tiene permiso para usar esta aplicación. Pida acceso al área de TI.", 403)
+    elif CLAVE:  # acceso opcional con usuario y clave (recomendado si el servidor se abre a la red de la empresa)
         a = request.authorization
         if not a or a.username != USUARIO or not secrets.compare_digest(a.password or "", CLAVE):
             return Response("Acceso restringido", 401, {"WWW-Authenticate": 'Basic realm="Cruce de afiliados"'})
+        usuario = USUARIO
     g.sid, g.s = almacen.obtener(request.cookies.get("sid"))
+    if ACCESO.windows and g.s.usuario and g.s.usuario != usuario:     # una sesión nunca la comparten dos personas
+        almacen.borrar(g.sid)
+        g.sid, g.s = almacen.obtener(None)
+    g.s.usuario = usuario or ""
+    g.usuario = usuario
 
 
 @app.after_request
@@ -86,7 +104,7 @@ app.jinja_env.globals.update(fmt=fmt, pct=pct, vista=vista, PASOS=PASOS)
 
 @app.context_processor
 def contexto():
-    return {"s": getattr(g, "s", None), "mensaje": _pop_mensaje()}
+    return {"s": getattr(g, "s", None), "mensaje": _pop_mensaje(), "usuario": getattr(g, "usuario", None)}
 
 def _pop_mensaje():
     if not hasattr(g, "s"):
@@ -130,7 +148,7 @@ def paso(n: int):
                    req_nac=C.REQ_NAC,
                    sug_nac={f: _opciones(s.nac_orig, s.nac_headers, f) for f in columnas_faltantes(s.nac_headers, C.REQ_NAC)},
                    sug_bdua={k: {f: _opciones(s.bdua_orig[k], h, f) for f in columnas_faltantes(h, C.REQ_BDUA)} for k, h in s.bdua_headers.items()},
-                   estados=_estados(s), listo=_listo(s))
+                   estados=_estados(s), listo=_listo(s), sql_ok=S.disponible(), sql_def=S.desde_entorno())
     elif n == 2:
         r = s.r2
         ctx.update(llaves=C.LLAVES, llave_falta=P.columnas_llave_faltantes(s.nac, s.bdua, "afl_id"))
@@ -199,6 +217,63 @@ def subir():
     except Exception as e:  # archivo dañado, formato no válido, etc.
         avisar("err", f"No se pudo leer el archivo: {e}")
     return redirect(url_for("paso", n=1))
+
+# ------------------------------------------------------------------ paso 1: lectura directa desde SQL Server (HU-12)
+def _conexion_de(f, previa: dict | None = None) -> S.Conexion:
+    """Conexión armada con lo que se escribió. La clave solo vive en esta petición: no se guarda en la sesión."""
+    base = S.desde_entorno()
+    p = previa or {}
+    return S.Conexion(servidor=(p.get("servidor") or f.get("servidor", "")).strip(), base_nac=(p.get("base_nac") or f.get("base_nac", base.base_nac)).strip(),
+                      base_bdua=(p.get("base_bdua") or f.get("base_bdua", base.base_bdua)).strip(), driver=base.driver,
+                      usuario=(p["usuario"] if "usuario" in p else f.get("usuario", "")).strip(), clave=f.get("clave", "") or base.clave,
+                      confiar_certificado=bool(p["confiar"]) if "confiar" in p else ("confiar" in f), patron_nac=base.patron_nac, patron_bdua=base.patron_bdua)
+
+
+@app.post("/paso/1/sql")
+def sql_accion():
+    s: Sesion = g.s; f = request.form; accion = f.get("accion", "")
+    if accion == "restablecer":
+        s.sql = {}; return redirect(url_for("paso", n=1) + "#sql")
+    c = None
+    try:
+        if accion == "buscar":
+            c = _conexion_de(f)
+            conn = S.abrir(c)
+            try:
+                nac, bdua = S.listar_tablas(conn, c.base_nac, c.patron_nac), S.listar_tablas(conn, c.base_bdua, c.patron_bdua)
+            finally:
+                conn.close()
+            if not nac or not bdua:
+                raise S.ErrorSQL("No se encontraron tablas " + ("de la base nacional" if not nac else "BDUA") + f" en {c.base_nac if not nac else c.base_bdua}. Revise los nombres de las bases de datos.")
+            s.sql = dict(servidor=c.servidor, base_nac=c.base_nac, base_bdua=c.base_bdua, usuario=c.usuario, confiar=c.confiar_certificado,
+                         nac=nac, bdua=bdua, sug_nac=S.sugeridas(nac)[:1], sug_bdua=S.sugeridas(bdua))
+            avisar("ok", f"Se encontraron {len(nac)} tablas de la base nacional y {len(bdua)} tablas BDUA. Elija cuáles leer.")
+        elif accion == "leer":
+            if not s.sql:
+                raise S.ErrorSQL("Primero busque las tablas.")
+            tn, tb = f.get("tabla_nac", ""), f.getlist("tabla_bdua")
+            if tn not in s.sql["nac"] or not tb or any(t not in s.sql["bdua"] for t in tb):
+                raise S.ErrorSQL("Elija la tabla de la base nacional y al menos una tabla BDUA de las listadas.")
+            c = _conexion_de(f, s.sql)
+            conn = S.abrir(c)
+            try:
+                nac, orig = S.leer_tabla_sql(conn, S.referencia(c.base_nac, tn), s.alias)
+                bdua = {t.partition(".")[2]: S.leer_tabla_sql(conn, S.referencia(c.base_bdua, t), s.alias) for t in tb}
+            finally:
+                conn.close()
+            s.nac, s.nac_orig, s.nac_nombre, s.estados = nac, orig, f"{tn.partition('.')[2]} (SQL Server)", None
+            s.nac_headers = nombres_efectivos(orig, s.alias)
+            for nombre, (t, o) in bdua.items():
+                s.bdua[nombre], s.bdua_orig[nombre] = t, o
+                s.bdua_headers[nombre] = nombres_efectivos(o, s.alias)
+            s.invalidar_desde(2)
+            avisar("ok", f"Se leyeron {fmt(len(nac))} filas de la base nacional y {len(bdua)} tabla(s) BDUA desde SQL Server. Nada se guardó en disco.")
+    except S.ErrorSQL as e:
+        avisar("err", S._sin_clave(str(e), c) if c else str(e))
+    except Exception as e:   # cualquier otro fallo al leer: se explica sin mostrar la clave
+        avisar("err", "No se pudo leer desde SQL Server: " + (S._sin_clave(str(e), c) if c else str(e))[:300])
+    return redirect(url_for("paso", n=1) + "#sql")
+
 
 @app.post("/paso/1/quitar")
 def quitar():

@@ -50,6 +50,13 @@ def leer_tabla(nombre: str, contenido: bytes, alias: list[dict] | None = None) -
         df = pd.read_csv(io.StringIO(texto), dtype=str, keep_default_na=False, sep=sep)
     else:
         df = pd.read_excel(bruto, dtype=str, keep_default_na=False, na_filter=False)
+    return preparar_tabla(df, alias)
+
+
+def preparar_tabla(df: pd.DataFrame, alias: list[dict] | None = None) -> tuple[pd.DataFrame, list[str]]:
+    """Deja una tabla (de un archivo o de SQL Server) en la forma que usa la aplicación: columnas en MAYÚSCULAS,
+    todo como texto, fechas aaaa/mm/dd. Devuelve (tabla, encabezados originales alineados con sus columnas)."""
+    df = df.copy()
     originales = [str(c).strip() for c in df.columns]
     nuevo = ~pd.Index([c.upper() for c in originales]).duplicated()     # por si hay columnas repetidas
     df = df.loc[:, nuevo]
@@ -57,7 +64,7 @@ def leer_tabla(nombre: str, contenido: bytes, alias: list[dict] | None = None) -
     renombrar(df, originales, alias or [])
     for c in df.columns:
         s = df[c].astype(str).str.strip()
-        s = s.str.replace(_FECHA_HORA, r"\1/\2/\3", regex=True)        # fechas de Excel -> aaaa/mm/dd
+        s = s.str.replace(_FECHA_HORA, r"\1/\2/\3", regex=True)        # fechas de Excel o SQL -> aaaa/mm/dd
         s = s.str.replace(r"^(\d+)\.0$", r"\1", regex=True)             # 3001234567.0 -> 3001234567
         df[c] = s.replace({"nan": "", "NaT": "", "None": ""})
     return df.reset_index(drop=True), originales
