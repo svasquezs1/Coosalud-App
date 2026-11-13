@@ -190,8 +190,7 @@ Objetivo: la analista abre `https://servidor-interno:puerto` desde su equipo, si
 | `CRUCE_PROXY_IPS` | `127.0.0.1,::1` | De dónde se acepta esa cabecera (el servidor web de adelante) |
 | `CRUCE_USUARIOS_PERMITIDOS` | vacío (todos) | Lista separada por comas, p. ej. `scarvajal,ehoyos` |
 | `CRUCE_SQL_SERVIDOR` | vacío | Servidor SQL que propone la pantalla del paso 1 |
-| `CRUCE_SQL_BASE_NACIONAL` / `CRUCE_SQL_BASE_BDUA` | `SALUS` / `BDUA` | Bases donde están `BD_SINERGIA_ddmmaaaa` y `AFI_*_aaaa_mm` |
-| `CRUCE_SQL_PATRON_NACIONAL` / `CRUCE_SQL_PATRON_BDUA` | `BD[_]SINERGIA%` / `AFI[_]%` | Qué tablas se listan (patrón `LIKE`) |
+| `CRUCE_SQL_BASE` | `SALUS` | Única base de datos que contiene las tablas nacional y BDUA (admite `CRUCE_SQL_BASE_NACIONAL` como valor anterior) |
 | `CRUCE_SQL_USUARIO` / `CRUCE_SQL_CLAVE` | vacío | Solo si no se usa autenticación de Windows |
 | `CRUCE_SQL_DRIVER` | `ODBC Driver 18 for SQL Server` | Nombre del controlador instalado |
 | `CRUCE_SQL_CONFIAR_CERTIFICADO` | vacío | `1` solo si TI lo indica (certificado interno sin cadena de confianza) |
@@ -206,9 +205,12 @@ La aplicación no autentica a nadie por sí sola: lo hace un servidor web de la 
 Sin esto, en el propio equipo (127.0.0.1) no se pide nada y se muestra el usuario del equipo.
 
 ### Lectura desde SQL Server (HU-12)
-Paso 1 → «Leer directamente desde SQL Server». Pasos: **Buscar tablas** (lista las `BD_SINERGIA_*` de la base nacional y las `AFI_*` de BDUA y deja marcadas las más recientes) → **Leer tablas**. Lo leído entra por el mismo camino que un archivo subido (alias de columnas, cruce, IPS…), y no se escribe nada en disco.
-- **Instalación (una vez por equipo):** `pip install -r requirements-sql.txt` y el controlador *ODBC Driver 18 for SQL Server* de Microsoft. Sin ellos la pantalla avisa y se siguen usando archivos.
-- **Credenciales:** si el usuario de SQL se deja vacío, se usa la autenticación integrada de Windows (`Trusted_Connection=yes`): es el usuario con el que corre la aplicación, así que quien la abre en su equipo no escribe nada. TI debe darle **solo lectura** sobre las bases `SALUS` y `BDUA`. Con un usuario de SQL, la clave se pide en cada lectura y no se guarda.
+Paso 1 → «Leer directamente desde SQL Server». Indique el servidor y una sola base de datos. **Buscar tablas** lista todas las tablas visibles, con esquema y nombre completo, sin filtrar por nombre ni elegir automáticamente las más recientes. Seleccione manualmente una **Tabla nacional (SALUS)** y una **Tabla BDUA**, distintas, y pulse **Leer tablas**. Así puede usar los nombres que correspondan a cada mes. Lo leído usa el mismo proceso que los archivos subidos, sin guardarse en disco.
+- **Instalación en el equipo donde corre la aplicación:** `pyodbc` está incluido en `requirements.txt`. Los iniciadores `iniciar.bat` e `iniciar.sh` instalan las dependencias también cuando `.venv` ya existe. Si la instalación falla, detienen el arranque y muestran el error.
+- **Actualizar manualmente en Windows (CMD):** desde la carpeta del proyecto, ejecute `.venv\Scripts\python.exe -m pip install -r requirements.txt`, reinicie la aplicación y recargue la página.
+- **Controlador del sistema:** instale por separado *ODBC Driver 18 for SQL Server* de Microsoft en el equipo donde corre la aplicación. No se instala con pip. Si se usa otro controlador, configure su nombre exacto en `CRUCE_SQL_DRIVER`.
+- **Botón «Buscar tablas» bloqueado:** significa que la aplicación no pudo importar `pyodbc`; todavía no se ha intentado conectar al servidor. Con `pyodbc` disponible, el botón se habilita; si falta el controlador ODBC, el error aparecerá al intentar conectar.
+- **Credenciales:** si el usuario de SQL se deja vacío, se usa la autenticación integrada de Windows (`Trusted_Connection=yes`): es el usuario con el que corre la aplicación, así que quien la abre en su equipo no escribe nada. TI debe darle **solo lectura** sobre la base de datos y las dos tablas seleccionadas. Con un usuario de SQL, la clave se pide en cada lectura y no se guarda.
 - Solo se ejecutan `SELECT * FROM [base].[esquema].[tabla]` y la consulta al catálogo `INFORMATION_SCHEMA.TABLES`; la conexión se abre con `ApplicationIntent=ReadOnly`.
 - **No probado contra el SQL Server real** (no hubo acceso). Las pruebas usan una base SQLite en memoria que imita al servidor. Antes de usarlo: probar con una tabla pequeña y comparar contra los archivos (mismo número de filas y misma cifra de cruce).
 - Si la aplicación corre como servicio, «su usuario de Windows» es el de la cuenta del servicio, no el de cada persona: en ese caso conviene una cuenta de servicio de solo lectura.

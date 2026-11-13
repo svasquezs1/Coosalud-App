@@ -267,3 +267,21 @@ def test_varias_llaves_en_pantalla(cli):
     h = cli.post("/paso/2/ejecutar", data={"llave": ["tipo_numero", "solo_numero"]}, follow_redirects=True).get_data(as_text=True)
     assert 'value="solo_numero" checked' in h and 'value="tipo_numero" checked' in h and 'value="afl_id" checked' not in h
     assert "Cruzado por: Tipo y número de documento (recomendada); Solo el número" in h and "Coinciden por tipo y número de documento:" in h
+
+
+def test_falta_estado_permite_asignarlo_sin_error_500(cli):
+    crudo = _renombrado({"ESTADO": "Situacion del afiliado"})
+    respuesta = _al_paso_2(cli, crudo, "sin_estado.xlsx")
+    assert respuesta.status_code == 200
+    h = respuesta.get_data(as_text=True)
+    assert "Faltan columnas: ESTADO" in h
+    assert "Falta la columna ESTADO en la tabla nacional" in h
+    assert "disabled" in h.split("Continuar al cruce")[0][-120:]
+    respuesta = cli.post("/paso/1/continuar", data={"estado": EST, "deps": "05"}, follow_redirects=True)
+    assert respuesta.status_code == 200 and respuesta.request.path == "/paso/1"
+    respuesta = cli.post("/paso/1/alias", data={"accion": "asignar", "falta": "ESTADO", "columna": "Situacion del afiliado"}, follow_redirects=True)
+    h = respuesta.get_data(as_text=True)
+    assert respuesta.status_code == 200 and "Columnas requeridas completas" in h
+    assert 'name="estado"' in h and "Falta la columna ESTADO" not in h
+    respuesta = cli.post("/paso/1/continuar", data={"estado": EST, "deps": "05"}, follow_redirects=True)
+    assert respuesta.request.path == "/paso/2"
