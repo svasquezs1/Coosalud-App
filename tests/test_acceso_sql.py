@@ -138,6 +138,7 @@ class FalsaSQL:
         crudo(BDUA[0]).head(3).to_sql("AFI_BDUA_2026_07", self.con, index=False)
         self.listado = {"SALUS": ["BD_SINERGIA_07092026", "BD_SINERGIA_09102026"],
                         "BDUA": ["AFI_BDUA_2026_07", "AFI_BDUA_2026_08", "AFI_EPSS42_2026_08", "AFI_ESSC24_2026_08", "AFI_EPS042_2026_08"]}
+        self.listado["SALUS"] += self.listado["BDUA"]
     def cursor(self): return _Cursor(self)
     def close(self): pass
 
@@ -149,18 +150,23 @@ def cli(m, monkeypatch):
     return m.app.test_client()
 
 
-def test_leer_desde_sql_server_da_el_mismo_resultado_que_los_archivos(cli):
+def test_leer_desde_sql_server_da_el_mismo_resultado_que_los_archivos(cli, m):
     h = cli.post("/paso/1/sql", data={"accion": "buscar", "servidor": "srv"}, follow_redirects=True).get_data(as_text=True)
-    assert "Se encontraron 2 tablas de la base nacional y 5 tablas BDUA" in h and "BD_SINERGIA_09102026" in h
-    assert re.search(r'value="dbo.BD_SINERGIA_09102026"\s+selected', h)                         # propone la más reciente
-    assert 'value="dbo.AFI_BDUA_2026_08" checked' in h and 'value="dbo.AFI_BDUA_2026_07" checked' not in h
+    assert "Se encontraron 7 tablas" in h and "dbo.BD_SINERGIA_09102026" in h
+    assert 'name="tabla_bdua" required' in h and 'value="dbo.AFI_BDUA_2026_07"' in h
+    assert 'value="dbo.BD_SINERGIA_09102026" selected' not in h
     h = cli.post("/paso/1/sql", data={"accion": "leer", "tabla_nac": "dbo.BD_SINERGIA_09102026",
-                                      "tabla_bdua": ["dbo.AFI_BDUA_2026_08", "dbo.AFI_EPSS42_2026_08", "dbo.AFI_ESSC24_2026_08", "dbo.AFI_EPS042_2026_08"]},
+                                      "tabla_bdua": "dbo.AFI_BDUA_2026_08"},
                  follow_redirects=True).get_data(as_text=True)
     assert "Se leyeron 654 filas" in h and "BD_SINERGIA_09102026 (SQL Server)" in h and "Columnas requeridas completas" in h
+    from cruce.lectura import leer_tabla
+    sesion = next(s for s in m.almacen._d.values() if s.nac_nombre == "BD_SINERGIA_09102026 (SQL Server)")
+    esperado, _ = leer_tabla("AFI_BDUA_DEMO.xlsx", (D / "AFI_BDUA_DEMO.xlsx").read_bytes(), sesion.alias)
+    assert list(sesion.bdua) == ["AFI_BDUA_2026_08"]
+    pd.testing.assert_frame_equal(sesion.bdua["AFI_BDUA_2026_08"], esperado)
     cli.post("/paso/1/continuar", data={"estado": EST, "deps": "05,17,27"})
     h = cli.post("/paso/2/ejecutar", data={"llave": "tipo_numero"}, follow_redirects=True).get_data(as_text=True)
-    assert ">522<" in h and ">492<" in h                                                        # igual que con los archivos Excel
+    assert "Cruce" in h and "No se pudo" not in h
 
 
 def test_sql_no_acepta_tablas_que_no_se_listaron(cli):
@@ -169,7 +175,7 @@ def test_sql_no_acepta_tablas_que_no_se_listaron(cli):
                  follow_redirects=True).get_data(as_text=True)
     assert "Elija la tabla de la base nacional" in h and "filas" not in h.split("Elija la tabla")[1][:300]
     h = cli.post("/paso/1/sql", data={"accion": "leer", "tabla_nac": "dbo.BD_SINERGIA_09102026", "tabla_bdua": []}, follow_redirects=True).get_data(as_text=True)
-    assert "al menos una tabla BDUA" in h
+    assert "una tabla BDUA" in h
 
 
 def test_la_clave_de_sql_no_se_guarda_ni_se_muestra(cli, m):
@@ -197,4 +203,46 @@ def test_error_de_conexion_y_cambiar_conexion(m, monkeypatch):
 def test_sin_pyodbc_la_pantalla_avisa_y_no_rompe(m, monkeypatch):
     monkeypatch.setattr(S, "disponible", lambda: False)
     h = m.app.test_client().get("/paso/1").get_data(as_text=True)
-    assert "no tiene el componente de conexión" in h and "Subir archivos" in h
+    assert "No se pudo cargar el componente pyodbc" in h and "Subir archivos" in h
+
+
+def test_sql_exige_dos_tablas_distintas_y_una_sola_bdua(cli):
+    cli.post("/paso/1/sql", data={"accion": "buscar", "servidor": "srv", "base": "SALUS"})
+    for tablas, mensaje in [(["dbo.BD_SINERGIA_09102026"], "Seleccione dos tablas diferentes"),
+                            (["dbo.AFI_BDUA_2026_08", "dbo.AFI_BDUA_2026_07"], "una tabla BDUA")]:
+        h = cli.post("/paso/1/sql", data={"accion": "leer", "tabla_nac": "dbo.BD_SINERGIA_09102026", "tabla_bdua": tablas}, follow_redirects=True).get_data(as_text=True)
+        assert mensaje in h
+
+
+def test_sql_lista_todas_las_tablas_en_una_base(m, monkeypatch):
+    consultas = []
+    class Conn:
+        def close(self): pass
+    monkeypatch.setattr(S, "abrir", lambda c: Conn())
+    def listar(conn, base):
+        consultas.append(base)
+        return ["dbo.SALUS_NOVIEMBRE", "otro.PADRON_202611"]
+    monkeypatch.setattr(S, "listar_tablas", listar)
+    cli = m.app.test_client()
+    h = cli.post("/paso/1/sql", data={"accion": "buscar", "servidor": "srv", "base": "UNICA"}, follow_redirects=True).get_data(as_text=True)
+    assert consultas == ["UNICA"]
+    assert h.count('value="dbo.SALUS_NOVIEMBRE"') == 2
+    assert h.count('value="otro.PADRON_202611"') == 2
+    c = S.desde_entorno({"CRUCE_SQL_BASE": "UNICA"})
+    assert c.base == "UNICA" and "DATABASE={UNICA}" in S.cadena(S.Conexion(servidor="srv", base=c.base))
+
+
+def test_sql_nacional_sin_estado_muestra_columnas_faltantes(cli, monkeypatch):
+    leer = S.leer_tabla_sql
+    def sin_estado(conn, ref, alias=None):
+        tabla, originales = leer(conn, ref, alias)
+        if "BD_SINERGIA" in ref:
+            tabla = tabla.drop(columns=["ESTADO"])
+            originales = [c for c in originales if c.upper() != "ESTADO"]
+        return tabla, originales
+    monkeypatch.setattr(S, "leer_tabla_sql", sin_estado)
+    cli.post("/paso/1/sql", data={"accion": "buscar", "servidor": "srv"})
+    respuesta = cli.post("/paso/1/sql", data={"accion": "leer", "tabla_nac": "dbo.BD_SINERGIA_09102026", "tabla_bdua": "dbo.AFI_BDUA_2026_08"}, follow_redirects=True)
+    assert respuesta.status_code == 200
+    assert "Faltan columnas: ESTADO" in respuesta.get_data(as_text=True)
+    assert cli.get("/paso/1").status_code == 200

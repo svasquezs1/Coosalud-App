@@ -2,7 +2,7 @@
 la conexión es la del usuario con el que corre la aplicación, así que nadie escribe credenciales.
 Las bases y tablas de la EPS cambian cada mes (BD_SINERGIA_ddmmaaaa, AFI_BDUA_aaaa_mm), por eso la aplicación
 consulta el catálogo del servidor, lista lo que hay y propone lo más reciente.
-Necesita el paquete pyodbc y el controlador «ODBC Driver 18 for SQL Server» (ver requirements-sql.txt); si no están,
+Necesita el paquete pyodbc (incluido en requirements.txt) y el controlador «ODBC Driver 18 for SQL Server»; si no están,
 el resto de la aplicación funciona igual con archivos."""
 from __future__ import annotations
 import os
@@ -25,8 +25,7 @@ class ErrorSQL(Exception):
 @dataclass
 class Conexion:
     servidor: str = ""
-    base_nac: str = "SALUS"
-    base_bdua: str = "BDUA"
+    base: str = "SALUS"
     driver: str = "ODBC Driver 18 for SQL Server"
     usuario: str = ""                                   # vacío = autenticación integrada de Windows
     clave: str = field(default="", repr=False)
@@ -40,8 +39,7 @@ def desde_entorno(env=None) -> Conexion:
     """Valores iniciales de la pantalla (los define TI con variables de entorno CRUCE_SQL_*)."""
     env = os.environ if env is None else env
     g = lambda k, d="": env.get(k, d).strip()
-    return Conexion(servidor=g("CRUCE_SQL_SERVIDOR"), base_nac=g("CRUCE_SQL_BASE_NACIONAL", "SALUS"),
-                    base_bdua=g("CRUCE_SQL_BASE_BDUA", "BDUA"), driver=g("CRUCE_SQL_DRIVER", "ODBC Driver 18 for SQL Server"),
+    return Conexion(servidor=g("CRUCE_SQL_SERVIDOR"), base=g("CRUCE_SQL_BASE", g("CRUCE_SQL_BASE_NACIONAL", "SALUS")), driver=g("CRUCE_SQL_DRIVER", "ODBC Driver 18 for SQL Server"),
                     usuario=g("CRUCE_SQL_USUARIO"), clave=env.get("CRUCE_SQL_CLAVE", ""),
                     confiar_certificado=g("CRUCE_SQL_CONFIAR_CERTIFICADO").lower() in ("1", "si", "sí", "true", "yes"),
                     patron_nac=g("CRUCE_SQL_PATRON_NACIONAL", "BD[_]SINERGIA%"), patron_bdua=g("CRUCE_SQL_PATRON_BDUA", "AFI[_]%"))
@@ -54,7 +52,7 @@ def _valor(v: str) -> str:
 def cadena(c: Conexion) -> str:
     if not c.servidor.strip():
         raise ErrorSQL("Falta el nombre del servidor.")
-    partes = [f"DRIVER={_valor(c.driver)}", f"SERVER={_valor(c.servidor.strip())}", f"DATABASE={_valor(c.base_nac)}"]
+    partes = [f"DRIVER={_valor(c.driver)}", f"SERVER={_valor(c.servidor.strip())}", f"DATABASE={_valor(c.base)}"]
     if c.usuario.strip():
         partes += [f"UID={_valor(c.usuario.strip())}", f"PWD={_valor(c.clave)}"]
     else:
@@ -130,7 +128,7 @@ def sugeridas(tablas: list[str]) -> list[str]:
     return sorted(vistas.values())
 
 
-def listar_tablas(conn, base: str, patron: str) -> list[str]:
+def listar_tablas(conn, base: str, patron: str = "%") -> list[str]:
     sql = f"SELECT TABLE_SCHEMA, TABLE_NAME FROM {parte(base)}.INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME LIKE ?"
     try:
         cur = conn.cursor(); cur.execute(sql, (patron,))

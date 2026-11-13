@@ -142,6 +142,9 @@ def paso(n: int):
         return redirect(url_for("paso", n=s.paso_max))
     ctx = dict(n=n)
     if n == 1:
+        if s.sql and ("base" not in s.sql or "tablas" not in s.sql):
+            s.sql = {}
+            avisar("ok", "La configuración de SQL cambió. Vuelva a buscar las tablas en una sola base de datos.")
         ctx.update(nac_falt=columnas_faltantes(s.nac_headers, C.REQ_NAC) if s.nac is not None else [],
                    nac_opc=columnas_faltantes(s.nac_headers, C.OPT_NAC) if s.nac is not None else [],
                    bdua_falt={k: columnas_faltantes(h, C.REQ_BDUA) for k, h in s.bdua_headers.items()},
@@ -187,7 +190,7 @@ def paso(n: int):
 
 
 def _estados(s: Sesion) -> list[tuple[str, int, bool]]:
-    if s.nac is None:
+    if s.nac is None or "ESTADO" not in s.nac.columns:
         return []
     cuentas = s.nac["ESTADO"].str.strip().str.upper().replace("", "(VACÍO)").value_counts()
     marcados = set(s.estados) if s.estados is not None else set(C.ESTADOS_VIGENTES_CONOCIDOS)
@@ -223,8 +226,7 @@ def _conexion_de(f, previa: dict | None = None) -> S.Conexion:
     """Conexión armada con lo que se escribió. La clave solo vive en esta petición: no se guarda en la sesión."""
     base = S.desde_entorno()
     p = previa or {}
-    return S.Conexion(servidor=(p.get("servidor") or f.get("servidor", "")).strip(), base_nac=(p.get("base_nac") or f.get("base_nac", base.base_nac)).strip(),
-                      base_bdua=(p.get("base_bdua") or f.get("base_bdua", base.base_bdua)).strip(), driver=base.driver,
+    return S.Conexion(servidor=(p.get("servidor") or f.get("servidor", "")).strip(), base=(p.get("base") or f.get("base", base.base)).strip(), driver=base.driver,
                       usuario=(p["usuario"] if "usuario" in p else f.get("usuario", "")).strip(), clave=f.get("clave", "") or base.clave,
                       confiar_certificado=bool(p["confiar"]) if "confiar" in p else ("confiar" in f), patron_nac=base.patron_nac, patron_bdua=base.patron_bdua)
 
@@ -240,29 +242,31 @@ def sql_accion():
             c = _conexion_de(f)
             conn = S.abrir(c)
             try:
-                nac, bdua = S.listar_tablas(conn, c.base_nac, c.patron_nac), S.listar_tablas(conn, c.base_bdua, c.patron_bdua)
+                tablas = S.listar_tablas(conn, c.base)
             finally:
                 conn.close()
-            if not nac or not bdua:
-                raise S.ErrorSQL("No se encontraron tablas " + ("de la base nacional" if not nac else "BDUA") + f" en {c.base_nac if not nac else c.base_bdua}. Revise los nombres de las bases de datos.")
-            s.sql = dict(servidor=c.servidor, base_nac=c.base_nac, base_bdua=c.base_bdua, usuario=c.usuario, confiar=c.confiar_certificado,
-                         nac=nac, bdua=bdua, sug_nac=S.sugeridas(nac)[:1], sug_bdua=S.sugeridas(bdua))
-            avisar("ok", f"Se encontraron {len(nac)} tablas de la base nacional y {len(bdua)} tablas BDUA. Elija cuáles leer.")
+            if not tablas:
+                raise S.ErrorSQL(f"No se encontraron tablas en {c.base}. Revise la base de datos y sus permisos de lectura.")
+            s.sql = dict(servidor=c.servidor, base=c.base, usuario=c.usuario, confiar=c.confiar_certificado, tablas=tablas)
+            avisar("ok", f"Se encontraron {len(tablas)} tablas. Seleccione la tabla nacional (SALUS) y la tabla BDUA del mes.")
         elif accion == "leer":
             if not s.sql:
                 raise S.ErrorSQL("Primero busque las tablas.")
             tn, tb = f.get("tabla_nac", ""), f.getlist("tabla_bdua")
-            if tn not in s.sql["nac"] or not tb or any(t not in s.sql["bdua"] for t in tb):
-                raise S.ErrorSQL("Elija la tabla de la base nacional y al menos una tabla BDUA de las listadas.")
+            if tn not in s.sql["tablas"] or len(tb) != 1 or any(t not in s.sql["tablas"] for t in tb):
+                raise S.ErrorSQL("Elija la tabla de la base nacional (SALUS) y una tabla BDUA de las listadas.")
+            if tn == tb[0]:
+                raise S.ErrorSQL("Seleccione dos tablas diferentes: nacional (SALUS) y BDUA.")
             c = _conexion_de(f, s.sql)
             conn = S.abrir(c)
             try:
-                nac, orig = S.leer_tabla_sql(conn, S.referencia(c.base_nac, tn), s.alias)
-                bdua = {t.partition(".")[2]: S.leer_tabla_sql(conn, S.referencia(c.base_bdua, t), s.alias) for t in tb}
+                nac, orig = S.leer_tabla_sql(conn, S.referencia(c.base, tn), s.alias)
+                bdua = {t.partition(".")[2]: S.leer_tabla_sql(conn, S.referencia(c.base, t), s.alias) for t in tb}
             finally:
                 conn.close()
             s.nac, s.nac_orig, s.nac_nombre, s.estados = nac, orig, f"{tn.partition('.')[2]} (SQL Server)", None
             s.nac_headers = nombres_efectivos(orig, s.alias)
+            s.bdua, s.bdua_orig, s.bdua_headers = {}, {}, {}
             for nombre, (t, o) in bdua.items():
                 s.bdua[nombre], s.bdua_orig[nombre] = t, o
                 s.bdua_headers[nombre] = nombres_efectivos(o, s.alias)
