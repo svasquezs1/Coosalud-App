@@ -1,7 +1,7 @@
 """Lectura directa desde SQL Server (solo SELECT). Sin usuario y clave se usa la autenticación integrada de Windows:
 la conexión es la del usuario con el que corre la aplicación, así que nadie escribe credenciales.
 Las bases y tablas de la EPS cambian cada mes (BD_SINERGIA_ddmmaaaa, AFI_BDUA_aaaa_mm), por eso la aplicación
-consulta el catálogo del servidor, lista lo que hay y propone lo más reciente.
+consulta el catálogo del servidor, lista solo las tablas de SINERGIA y BDUA y propone lo más reciente.
 Necesita el paquete pyodbc (incluido en requirements.txt) y el controlador «ODBC Driver 18 for SQL Server»; si no están,
 el resto de la aplicación funciona igual con archivos."""
 from __future__ import annotations
@@ -25,12 +25,12 @@ class ErrorSQL(Exception):
 @dataclass
 class Conexion:
     servidor: str = ""
-    base: str = "SALUS"
+    base: str = ""
     driver: str = "ODBC Driver 18 for SQL Server"
     usuario: str = ""                                   # vacío = autenticación integrada de Windows
     clave: str = field(default="", repr=False)
     confiar_certificado: bool = False
-    segundos: int = 30
+    segundos: int = 0                                # 0 = sin límite de tiempo en pyodbc
     patron_nac: str = "BD[_]SINERGIA%"
     patron_bdua: str = "AFI[_]%"
 
@@ -74,7 +74,7 @@ def _sin_clave(texto: str, c: Conexion) -> str:
 
 
 def abrir(c: Conexion):
-    """Abre la conexión. Los errores salen en español y sin datos sensibles."""
+    """Abre la conexión sin límite de tiempo. Los errores salen en español y sin datos sensibles."""
     try:
         import pyodbc
     except Exception:
@@ -128,14 +128,25 @@ def sugeridas(tablas: list[str]) -> list[str]:
     return sorted(vistas.values())
 
 
-def listar_tablas(conn, base: str, patron: str = "%") -> list[str]:
-    sql = f"SELECT TABLE_SCHEMA, TABLE_NAME FROM {parte(base)}.INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME LIKE ?"
+def listar_tablas(conn, base: str, patron: str | None = None) -> list[str]:
+    """Lista las tablas de SINERGIA y BDUA sin recorrer tablas no relacionadas."""
+    patrones = (patron,) if patron is not None else ("%sinergia%", "AFI[_]%")
+    filtros = " OR ".join("t.name LIKE ?" for _ in patrones)
+    sql = f"""SELECT
+    s.name AS Esquema,
+    t.name AS Tabla,
+    t.create_date AS FechaCreacion
+FROM {parte(base)}.sys.tables AS t
+JOIN {parte(base)}.sys.schemas AS s
+    ON s.schema_id = t.schema_id
+WHERE {filtros}
+ORDER BY t.create_date, s.name, t.name"""
     try:
-        cur = conn.cursor(); cur.execute(sql, (patron,))
+        cur = conn.cursor(); cur.execute(sql, patrones)
         filas = cur.fetchall()
     except Exception as e:
         raise ErrorSQL(f"No se pudieron listar las tablas de {base}: {str(e)[:300]}")
-    return ordenar([f"{r[0]}.{r[1]}" for r in filas])
+    return [f"{r[0]}.{r[1]}" for r in filas]
 
 
 def leer_tabla_sql(conn, ref: str, alias: list[dict] | None = None, trozo: int = 50_000) -> tuple[pd.DataFrame, list[str]]:

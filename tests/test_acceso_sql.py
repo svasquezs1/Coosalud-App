@@ -81,6 +81,17 @@ def test_cadena_de_conexion():
     assert S.desde_entorno({"CRUCE_SQL_SERVIDOR": "x", "CRUCE_SQL_CONFIAR_CERTIFICADO": "1"}).confiar_certificado
 
 
+def test_conexion_sql_sin_tiempo_limite(monkeypatch):
+    llamadas = []
+    falso = types.ModuleType("pyodbc")
+    falso.connect = lambda *a, **k: llamadas.append(k) or object()
+    monkeypatch.setitem(sys.modules, "pyodbc", falso)
+
+    S.abrir(S.Conexion(servidor="srv"))
+
+    assert llamadas == [{"timeout": 0, "autocommit": True}]
+
+
 def test_nombres_de_tablas_se_validan():
     assert S.referencia("SALUS", "dbo.BD_SINERGIA_09102026") == "[SALUS].[dbo].[BD_SINERGIA_09102026]"
     for malo in ("dbo.x]; DROP TABLE y;--", "dbo.a b", "solo", "dbo."):
@@ -117,9 +128,10 @@ def test_sin_pyodbc_y_errores_sin_clave(monkeypatch):
 class _Cursor:
     def __init__(self, falsa): self.f, self.description, self._filas, self._c = falsa, None, [], None
     def execute(self, sql, params=()):
-        if "INFORMATION_SCHEMA" in sql:
-            base = re.search(r"FROM \[(\w+)\]\.INFORMATION_SCHEMA", sql).group(1)
-            self._filas = [("dbo", t) for t in self.f.listado[base]]; self.description = [("TABLE_SCHEMA",), ("TABLE_NAME",)]
+        if ".sys.tables" in sql:
+            base = re.search(r"FROM \[(\w+)\]\.\[?sys\]?\.\[?tables\]?", sql).group(1)
+            self._filas = [("dbo", t, None) for t in self.f.listado[base]]
+            self.description = [("Esquema",), ("Tabla",), ("FechaCreacion",)]
         else:
             self._c = self.f.con.execute(re.sub(r"\[\w+\]\.\[\w+\]\.", "", sql)); self.description = self._c.description   # sqlite no tiene base.esquema.tabla
     def fetchall(self): return self._filas
@@ -230,6 +242,25 @@ def test_sql_lista_todas_las_tablas_en_una_base(m, monkeypatch):
     assert h.count('value="otro.PADRON_202611"') == 2
     c = S.desde_entorno({"CRUCE_SQL_BASE": "UNICA"})
     assert c.base == "UNICA" and "DATABASE={UNICA}" in S.cadena(S.Conexion(servidor="srv", base=c.base))
+
+
+def test_listar_tablas_usa_catalogo_filtrado():
+    consultas = []
+
+    class Cursor:
+        def execute(self, sql, params):
+            consultas.append((sql, params))
+        def fetchall(self):
+            return [("dbo", "BD_SINERGIA_16112026", None)]
+
+    class Conn:
+        def cursor(self):
+            return Cursor()
+
+    assert S.listar_tablas(Conn(), "MERCADEO") == ["dbo.BD_SINERGIA_16112026"]
+    sql, params = consultas[0]
+    assert "MERCADEO].sys.tables" in sql and "MERCADEO].sys.schemas" in sql
+    assert "t.name LIKE ?" in sql and params == ("%sinergia%", "AFI[_]%")
 
 
 def test_sql_nacional_sin_estado_muestra_columnas_faltantes(cli, monkeypatch):
