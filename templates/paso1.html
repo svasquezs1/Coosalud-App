@@ -3,107 +3,178 @@
 <form method="post" action="{{ url_for('alias_columnas') }}" class="row ayuda">
   <input type="hidden" name="accion" value="asignar"><input type="hidden" name="falta" value="{{ falta }}">
   <span>Falta <b>{{ falta }}</b>. ¿Cuál columna de su archivo es?</span>
-  <select name="columna" aria-label="Columna de su archivo para {{ falta }}">{% for o in opciones %}<option>{{ o }}</option>{% endfor %}</select>
+  <select name="columna" aria-label="Columna de su archivo para {{ falta }}">{% for o in opciones %}<option>{{ o }}
+    </option>{% endfor %}</select>
   <button class="mini" type="submit" {{ '' if opciones else 'disabled' }}>Usar esta columna</button>
 </form>{% endmacro %}
 {% block contenido %}
 <h2>1. Cargar archivos</h2>
-<p class="lead">Suba la base que envía el nivel nacional y las tablas BDUA del mes. Acepta Excel (.xlsx) y CSV. Los procesos siguen en orden: primero el cruce, luego la IPS y al final los contactos.</p>
-<form method="post" action="{{ url_for('subir') }}" enctype="multipart/form-data">
-<div class="grid g2">
-  <div class="box"><label class="t" for="nacional">Base del nivel nacional (BD_SINERGIA)</label>
-    <input type="file" id="nacional" name="nacional" accept=".xlsx,.csv"></div>
-  <div class="box"><label class="t" for="bdua">Tablas BDUA (una o varias)</label>
-    <input type="file" id="bdua" name="bdua" accept=".xlsx,.csv" multiple></div>
-</div>
-<div class="row" style="margin-top:12px"><button class="btn sec" type="submit">Subir archivos</button><span class="muted">Puede subir primero un grupo y luego otro.</span></div>
+<p class="lead">Suba la base que envía el nivel nacional y las tablas BDUA del mes. Acepta Excel (.xlsx) y CSV. Los
+  procesos siguen en orden: primero el cruce, luego la IPS y al final los contactos.</p>
+<fieldset class="source-choice">
+  <legend>¿De dónde desea obtener los datos?</legend>
+  <div class="source-options">
+    <a class="source-option" href="#carga-local"><b>Cargar archivos localmente</b><small>Excel o CSV desde su
+        equipo</small></a>
+    <a class="source-option" href="#sql"><b>Consultar desde SQL Server</b><small>Seleccionar las tablas del
+        mes</small></a>
+  </div>
+</fieldset>
+<form method="post" action="{{ url_for('subir') }}" enctype="multipart/form-data" id="carga-local">
+  <div class="grid g2">
+    <div class="box"><label class="t" for="nacional">Base del nivel nacional (BD_SINERGIA)</label>
+      <input type="file" id="nacional" name="nacional" accept=".xlsx,.csv">
+    </div>
+    <div class="box"><label class="t" for="bdua">Tablas BDUA (una o varias)</label>
+      <input type="file" id="bdua" name="bdua" accept=".xlsx,.csv" multiple>
+    </div>
+  </div>
+  <div class="row" style="margin-top:12px"><button class="btn sec" type="submit">Subir archivos</button><span
+      class="muted">Puede subir primero un grupo y luego otro.</span></div>
 </form>
 
-<details id="sql" class="mun" {{ 'open' if s.sql }}><summary><b>Leer directamente desde SQL Server</b> <span class="muted">· sin subir archivos</span></summary>
-{% if not sql_ok %}<p class="muted">No se pudo cargar el componente pyodbc en el equipo donde corre la aplicación. Cierre y vuelva a abrir la aplicación con el iniciador para instalar las dependencias, o consulte «Lectura desde SQL Server» del README. También necesita el controlador ODBC de SQL Server instalado por separado; mientras tanto puede subir los archivos.</p>{% endif %}
-{% if not s.sql %}
-<p class="muted">Si deja vacíos el usuario y la clave de SQL, se usa su usuario de Windows: no escribe credenciales. Se listan todas las tablas de la base de datos para que seleccione las dos que corresponden al mes.</p>
-<form method="post" action="{{ url_for('sql_accion') }}">
-  <input type="hidden" name="accion" value="buscar">
-  <div class="grid g2">
-    <div class="box"><label class="t" for="sql_servidor">Servidor</label><input type="text" id="sql_servidor" name="servidor" value="{{ sql_def.servidor }}" required></div>
-    <div class="box"><label class="t" for="sql_base">Base de datos</label><input type="text" id="sql_base" name="base" value="{{ sql_def.base }}" required></div>
-    <div class="box"><label class="t" for="sql_usuario">Usuario de SQL (solo si no usa Windows)</label><input type="text" id="sql_usuario" name="usuario" value="{{ sql_def.usuario }}" autocomplete="off">
-      <label class="t" for="sql_clave" style="margin-top:8px">Clave de SQL</label><input type="password" id="sql_clave" name="clave" autocomplete="off"></div>
-  </div>
-  <div class="row" style="margin-top:10px"><label class="row"><input type="checkbox" name="confiar"> Confiar en el certificado del servidor (solo si TI lo indica)</label>
-    <button class="btn sec" type="submit" {{ '' if sql_ok else 'disabled' }}>Buscar tablas</button></div>
-</form>
-{% else %}
-<p class="muted">Servidor <b>{{ s.sql.servidor }}</b> · Base de datos <b>{{ s.sql.base }}</b> · {{ ('usuario de SQL ' ~ s.sql.usuario) if s.sql.usuario else 'su usuario de Windows' }}. Seleccione manualmente dos tablas diferentes del mes; se muestra el esquema y el nombre completo.</p>
-<form method="post" action="{{ url_for('sql_accion') }}">
-  <input type="hidden" name="accion" value="leer">
-  <div class="grid g2">
-    <div class="box"><label class="t" for="sql_tabla_nac">Tabla nacional (SALUS)</label>
-      <select id="sql_tabla_nac" name="tabla_nac" required><option value="" selected disabled>Seleccione la tabla nacional (SALUS)</option>{% for t in s.sql.tablas %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select></div>
-    <div class="box"><label class="t" for="sql_tabla_bdua">Tabla BDUA</label>
-      <select id="sql_tabla_bdua" name="tabla_bdua" required><option value="" selected disabled>Seleccione la tabla BDUA</option>{% for t in s.sql.tablas %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select></div>
-  </div>
-  {% if s.sql.usuario %}<div class="box" style="margin-top:10px"><label class="t" for="sql_clave2">Clave de SQL (no se guarda)</label><input type="password" id="sql_clave2" name="clave" autocomplete="off"></div>{% endif %}
-  <div class="row" style="margin-top:10px"><button class="btn sec" type="submit">Leer tablas</button>
-    <span class="muted">Puede tardar unos minutos con la base completa.</span></div>
-</form>
-<form method="post" action="{{ url_for('sql_accion') }}" style="margin-top:8px"><input type="hidden" name="accion" value="restablecer"><button class="mini" type="submit">Cambiar la conexión</button></form>
-{% endif %}
-</details>
+<section id="sql" class="sql-source">
+  <h3>Leer directamente desde SQL Server <span class="muted">· sin subir archivos</span></h3>
+  {% if not sql_ok %}<p class="muted">No se pudo cargar el componente pyodbc en el equipo donde corre la aplicación.
+    Cierre y vuelva a abrir la aplicación con el iniciador para instalar las dependencias, o consulte «Lectura desde SQL
+    Server» del README. También necesita el controlador ODBC de SQL Server instalado por separado; mientras tanto puede
+    subir los archivos.</p>{% endif %}
+  {% if not s.sql %}
+  <p class="muted">Si deja vacíos el usuario y la clave de SQL, se usa su usuario de Windows: no escribe credenciales.
+    Se listan todas las tablas de la base de datos para que seleccione las dos que corresponden al mes.</p>
+  <form method="post" action="{{ url_for('sql_accion') }}">
+    <input type="hidden" name="accion" value="buscar">
+    <div class="grid g2">
+      <div class="box"><label class="t" for="sql_servidor">Servidor</label><input type="text" id="sql_servidor"
+          name="servidor" value="{{ sql_def.servidor }}" required></div>
+      <div class="box"><label class="t" for="sql_base">Base de datos</label><input type="text" id="sql_base" name="base"
+          value="{{ sql_def.base }}" required></div>
+      <div class="box"><label class="t" for="sql_usuario">Usuario de SQL (solo si no usa Windows)</label><input
+          type="text" id="sql_usuario" name="usuario" value="{{ sql_def.usuario }}" autocomplete="off">
+        <label class="t" for="sql_clave" style="margin-top:8px">Clave de SQL</label><input type="password"
+          id="sql_clave" name="clave" autocomplete="off">
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px"><label class="row"><input type="checkbox" name="confiar" checked> Confiar
+        en el certificado del servidor (solo si TI lo indica)</label>
+      <button class="btn sec" type="submit" {{ '' if sql_ok else 'disabled' }}>Buscar tablas</button>
+    </div>
+  </form>
+  {% else %}
+  <p class="muted">Servidor <b>{{ s.sql.servidor }}</b> · Base de datos <b>{{ s.sql.base }}</b> · {{ ('usuario de SQL '
+    ~ s.sql.usuario) if s.sql.usuario else 'su usuario de Windows' }}. Seleccione manualmente dos tablas diferentes del
+    mes; se muestra el esquema y el nombre completo.</p>
+  <form method="post" action="{{ url_for('sql_accion') }}">
+    <input type="hidden" name="accion" value="leer">
+    <div class="grid g2">
+      <div class="box"><label class="t" for="sql_tabla_nac">Tabla nacional (SALUS)</label>
+        <select id="sql_tabla_nac" name="tabla_nac" required>
+          <option value="" selected disabled>Seleccione la tabla nacional (SALUS)</option>{% for t in s.sql.tablas %}
+          <option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="box"><label class="t" for="sql_tabla_bdua">Tabla BDUA</label>
+        <select id="sql_tabla_bdua" name="tabla_bdua" required>
+          <option value="" selected disabled>Seleccione la tabla BDUA</option>{% for t in s.sql.tablas %}<option
+            value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    {% if s.sql.usuario %}<div class="box" style="margin-top:10px"><label class="t" for="sql_clave2">Clave de SQL (no se
+        guarda)</label><input type="password" id="sql_clave2" name="clave" autocomplete="off"></div>{% endif %}
+    <div class="row" style="margin-top:10px"><button class="btn sec" type="submit">Leer tablas</button>
+      <span class="muted">Puede tardar unos minutos con la base completa.</span>
+    </div>
+  </form>
+  <form method="post" action="{{ url_for('sql_accion') }}" style="margin-top:8px"><input type="hidden" name="accion"
+      value="restablecer"><button class="mini" type="submit">Cambiar la conexión</button></form>
+  {% endif %}
+</section>
 
 <div class="grid g2" style="margin-top:6px">
   <div>
-  {% if s.nac is not none %}
+    {% if s.nac is not none %}
     <div class="file"><span>{{ s.nac_nombre }} · {{ fmt(s.nac|length) }} filas</span>
-      <form method="post" action="{{ url_for('quitar') }}"><input type="hidden" name="que" value="nac"><button class="mini" type="submit">Quitar</button></form></div>
-    <div class="chips">{% if nac_falt %}<span class="chip bad">Faltan columnas: {{ nac_falt|join(', ') }}</span>{% else %}<span class="chip ok">Columnas requeridas completas</span>{% endif %}
-    {% if nac_opc %}<span class="chip warn">Sin {{ nac_opc|join(', ') }}: no se podrá revisar contactos</span>{% endif %}</div>
+      <form method="post" action="{{ url_for('quitar') }}"><input type="hidden" name="que" value="nac"><button
+          class="mini" type="submit">Quitar</button></form>
+    </div>
+    <div class="chips">{% if nac_falt %}<span class="chip bad">Faltan columnas: {{ nac_falt|join(', ') }}</span>{% else
+      %}<span class="chip ok">Columnas requeridas completas</span>{% endif %}
+      {% if nac_opc %}<span class="chip warn">Sin {{ nac_opc|join(', ') }}: no se podrá revisar contactos</span>{% endif
+      %}</div>
     {% for f in nac_falt %}{{ asignar(f, sug_nac[f]) }}{% endfor %}
-  {% endif %}
+    {% endif %}
   </div>
   <div>
-  {% for nombre, t in s.bdua.items() %}
+    {% for nombre, t in s.bdua.items() %}
     <div class="file"><span>{{ nombre }} · {{ fmt(t|length) }} filas
-      {% if bdua_falt[nombre] %}<span class="chip bad">faltan: {{ bdua_falt[nombre]|join(', ') }}</span>{% else %}<span class="chip ok">ok</span>{% endif %}</span>
-      <form method="post" action="{{ url_for('quitar') }}"><input type="hidden" name="que" value="bdua:{{ nombre }}"><button class="mini" type="submit">Quitar</button></form></div>
+        {% if bdua_falt[nombre] %}<span class="chip bad">faltan: {{ bdua_falt[nombre]|join(', ') }}</span>{% else
+        %}<span class="chip ok">ok</span>{% endif %}</span>
+      <form method="post" action="{{ url_for('quitar') }}"><input type="hidden" name="que"
+          value="bdua:{{ nombre }}"><button class="mini" type="submit">Quitar</button></form>
+    </div>
     {% for f in bdua_falt[nombre] %}{{ asignar(f, sug_bdua[nombre][f]) }}{% endfor %}
-  {% endfor %}
+    {% endfor %}
   </div>
 </div>
 
-<details id="alias" style="margin-top:14px" open><summary><b>Nombres de columnas</b> <span class="muted">· si el nivel nacional cambia el nombre de una columna</span></summary>
-<p class="muted">Cada fila dice cómo se llama la columna en el archivo y cómo la reconoce la aplicación. No hace falta tocar el archivo: agregue o cambie una fila y los archivos ya cargados se actualizan solos. Mayúsculas, minúsculas y espacios no importan.</p>
-<form method="post" action="{{ url_for('alias_columnas') }}" enctype="multipart/form-data">
-<button type="submit" name="accion" value="guardar" class="sr" tabindex="-1" aria-hidden="true"></button>
-<div class="row" style="margin-bottom:8px">
-  <button class="mini" name="accion" value="agregar" type="submit">+ Agregar nombre</button>
-  <button class="mini" name="accion" value="guardar" type="submit">Guardar cambios</button>
-  <a class="mini" href="{{ url_for('alias_csv') }}" style="text-decoration:none;padding:3px 9px">Descargar (CSV)</a>
-  <input type="file" name="csv_alias" accept=".csv"><button class="mini" name="accion" value="importar" type="submit">Cargar (CSV)</button>
-  <button class="mini" name="accion" value="restablecer" type="submit">Volver a los iniciales</button>
-</div>
-<div class="tw" style="max-height:240px"><table>
-<thead><tr><th>Nombre en el archivo</th><th>Nombre que usa la aplicación</th><th></th></tr></thead>
-<tbody>{% for a in s.alias %}<tr>
-<td><input type="text" name="al_origen" value="{{ a.origen }}" size="28" aria-label="Nombre en el archivo"></td>
-<td><input type="text" name="al_destino" value="{{ a.destino }}" size="28" aria-label="Nombre que usa la aplicación"></td>
-<td><button class="mini" name="accion" value="quitar:{{ loop.index0 }}" type="submit">Quitar</button></td></tr>{% endfor %}</tbody></table></div>
-<p class="muted">La aplicación necesita estas columnas: {{ req_nac|join(', ') }}. Para el cruce con otra llave también puede usar AFL_ID_BDUA.</p>
-</form></details>
+<details id="alias" style="margin-top:14px" open>
+  <summary><b>Nombres de columnas</b> <span class="muted">· si el nivel nacional cambia el nombre de una columna</span>
+  </summary>
+  <p class="muted">Cada fila dice cómo se llama la columna en el archivo y cómo la reconoce la aplicación. No hace falta
+    tocar el archivo: agregue o cambie una fila y los archivos ya cargados se actualizan solos. Mayúsculas, minúsculas y
+    espacios no importan.</p>
+  <form method="post" action="{{ url_for('alias_columnas') }}" enctype="multipart/form-data">
+    <button type="submit" name="accion" value="guardar" class="sr" tabindex="-1" aria-hidden="true"></button>
+    <div class="row" style="margin-bottom:8px">
+      <button class="mini" name="accion" value="agregar" type="submit">+ Agregar nombre</button>
+      <button class="mini" name="accion" value="guardar" type="submit">Guardar cambios</button>
+      <a class="mini" href="{{ url_for('alias_csv') }}" style="text-decoration:none;padding:3px 9px">Descargar (CSV)</a>
+      <input type="file" name="csv_alias" accept=".csv"><button class="mini" name="accion" value="importar"
+        type="submit">Cargar (CSV)</button>
+      <button class="mini" name="accion" value="restablecer" type="submit">Volver a los iniciales</button>
+    </div>
+    <div class="tw" style="max-height:240px">
+      <table>
+        <thead>
+          <tr>
+            <th>Nombre en el archivo</th>
+            <th>Nombre que usa la aplicación</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>{% for a in s.alias %}<tr>
+            <td><input type="text" name="al_origen" value="{{ a.origen }}" size="28" aria-label="Nombre en el archivo">
+            </td>
+            <td><input type="text" name="al_destino" value="{{ a.destino }}" size="28"
+                aria-label="Nombre que usa la aplicación"></td>
+            <td><button class="mini" name="accion" value="quitar:{{ loop.index0 }}" type="submit">Quitar</button></td>
+          </tr>{% endfor %}</tbody>
+      </table>
+    </div>
+    <p class="muted">La aplicación necesita estas columnas: {{ req_nac|join(', ') }}. Para el cruce con otra llave
+      también puede usar AFL_ID_BDUA.</p>
+  </form>
+</details>
 
 {% if s.nac is not none %}
 <form method="post" action="{{ url_for('continuar_1') }}">
   <h3>Qué cuenta como afiliado vigente</h3>
   {% if 'ESTADO' not in s.nac.columns %}
-  <p class="muted">Falta la columna ESTADO en la tabla nacional. En «Nombres de columnas», asigne la columna que contiene el estado del afiliado a ESTADO, o cargue la tabla nacional correcta.</p>
+  <p class="muted">Falta la columna ESTADO en la tabla nacional. En «Nombres de columnas», asigne la columna que
+    contiene el estado del afiliado a ESTADO, o cargue la tabla nacional correcta.</p>
   {% else %}
-  <p class="muted">Marque los estados de la base nacional que se consideran vigentes. Esto cambia con los estados nuevos del nivel nacional, así que se confirma con el área antes de usar los resultados.</p>
-  <div class="estados">{% for e, n_, marcado in estados %}<label><input type="checkbox" name="estado" value="{{ e }}" {{ 'checked' if marcado }}> {{ e }} <span class="muted">({{ fmt(n_) }})</span></label>{% endfor %}</div>
+  <p class="muted">Marque los estados de la base nacional que se consideran vigentes. Esto cambia con los estados nuevos
+    del nivel nacional, así que se confirma con el área antes de usar los resultados.</p>
+  <div class="estados">{% for e, n_, marcado in estados %}<label><input type="checkbox" name="estado" value="{{ e }}"
+        {{ 'checked' if marcado }}> {{ e }} <span class="muted">({{ fmt(n_) }})</span></label>{% endfor %}</div>
   {% endif %}
   <h3>Departamentos donde opera Coosalud</h3>
-  <div class="row"><input type="text" name="deps" value="{{ s.deps }}" size="16" aria-label="Departamentos"><span class="muted">Códigos separados por coma. Se incluyen también los afiliados con portabilidad hacia estos departamentos.</span></div>
-  <div class="row" style="margin-top:20px"><button class="btn" type="submit" {{ '' if listo else 'disabled' }}>Continuar al cruce</button></div>
+  <div class="row"><input type="text" name="deps" value="{{ s.deps }}" size="16" aria-label="Departamentos"><span
+      class="muted">Códigos separados por coma. Se incluyen también los afiliados con portabilidad hacia estos
+      departamentos.</span></div>
+  <div class="row" style="margin-top:20px"><button class="btn" type="submit" {{ '' if listo else 'disabled' }}>Continuar
+      al cruce</button></div>
 </form>
 {% endif %}
 {% endblock %}
