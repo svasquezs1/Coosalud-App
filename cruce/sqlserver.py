@@ -1,7 +1,7 @@
 """Lectura directa desde SQL Server (solo SELECT). Sin usuario y clave se usa la autenticación integrada de Windows:
 la conexión es la del usuario con el que corre la aplicación, así que nadie escribe credenciales.
 Las bases y tablas de la EPS cambian cada mes (BD_SINERGIA_ddmmaaaa, AFI_BDUA_aaaa_mm), por eso la aplicación
-consulta el catálogo del servidor, lista solo las tablas de SINERGIA y BDUA y propone lo más reciente.
+consulta el catálogo del servidor y lista todas las tablas visibles para su selección manual.
 Necesita el paquete pyodbc (incluido en requirements.txt) y el controlador «ODBC Driver 18 for SQL Server»; si no están,
 el resto de la aplicación funciona igual con archivos."""
 from __future__ import annotations
@@ -31,8 +31,6 @@ class Conexion:
     clave: str = field(default="", repr=False)
     confiar_certificado: bool = False
     segundos: int = 0                                # 0 = sin límite de tiempo en pyodbc
-    patron_nac: str = "BD[_]SINERGIA%"
-    patron_bdua: str = "AFI[_]%"
 
 
 def desde_entorno(env=None) -> Conexion:
@@ -41,8 +39,7 @@ def desde_entorno(env=None) -> Conexion:
     g = lambda k, d="": env.get(k, d).strip()
     return Conexion(servidor=g("CRUCE_SQL_SERVIDOR"), base=g("CRUCE_SQL_BASE", g("CRUCE_SQL_BASE_NACIONAL", "SALUS")), driver=g("CRUCE_SQL_DRIVER", "ODBC Driver 18 for SQL Server"),
                     usuario=g("CRUCE_SQL_USUARIO"), clave=env.get("CRUCE_SQL_CLAVE", ""),
-                    confiar_certificado=g("CRUCE_SQL_CONFIAR_CERTIFICADO").lower() in ("1", "si", "sí", "true", "yes"),
-                    patron_nac=g("CRUCE_SQL_PATRON_NACIONAL", "BD[_]SINERGIA%"), patron_bdua=g("CRUCE_SQL_PATRON_BDUA", "AFI[_]%"))
+                    confiar_certificado=g("CRUCE_SQL_CONFIAR_CERTIFICADO").lower() in ("1", "si", "sí", "true", "yes"))
 
 
 def _valor(v: str) -> str:
@@ -128,10 +125,8 @@ def sugeridas(tablas: list[str]) -> list[str]:
     return sorted(vistas.values())
 
 
-def listar_tablas(conn, base: str, patron: str | None = None) -> list[str]:
-    """Lista las tablas de SINERGIA y BDUA sin recorrer tablas no relacionadas."""
-    patrones = (patron,) if patron is not None else ("%sinergia%", "AFI[_]%")
-    filtros = " OR ".join("t.name LIKE ?" for _ in patrones)
+def listar_tablas(conn, base: str) -> list[str]:
+    """Lista todas las tablas visibles en la base, sin filtros de nombre o fecha."""
     sql = f"""SELECT
     s.name AS Esquema,
     t.name AS Tabla,
@@ -139,10 +134,9 @@ def listar_tablas(conn, base: str, patron: str | None = None) -> list[str]:
 FROM {parte(base)}.sys.tables AS t
 JOIN {parte(base)}.sys.schemas AS s
     ON s.schema_id = t.schema_id
-WHERE {filtros}
 ORDER BY t.create_date, s.name, t.name"""
     try:
-        cur = conn.cursor(); cur.execute(sql, patrones)
+        cur = conn.cursor(); cur.execute(sql)
         filas = cur.fetchall()
     except Exception as e:
         raise ErrorSQL(f"No se pudieron listar las tablas de {base}: {str(e)[:300]}")

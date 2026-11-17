@@ -192,7 +192,7 @@ def test_sql_no_acepta_tablas_que_no_se_listaron(cli):
 
 def test_la_clave_de_sql_no_se_guarda_ni_se_muestra(cli, m):
     h = cli.post("/paso/1/sql", data={"accion": "buscar", "servidor": "srv", "usuario": "lector", "clave": "secreta123"}, follow_redirects=True).get_data(as_text=True)
-    assert "secreta123" not in h and "usuario de SQL lector" in h and "Clave de SQL (no se guarda)" in h
+    assert "secreta123" not in h and "usuario de SQL lector" in h and "Clave de SQL (no se guarda)" in " ".join(h.split())
     assert all("secreta123" not in repr(s.sql) for s in m.almacen._d.values())
     assert "secreta123" not in cli.get("/paso/1").get_data(as_text=True)
 
@@ -244,23 +244,23 @@ def test_sql_lista_todas_las_tablas_en_una_base(m, monkeypatch):
     assert c.base == "UNICA" and "DATABASE={UNICA}" in S.cadena(S.Conexion(servidor="srv", base=c.base))
 
 
-def test_listar_tablas_usa_catalogo_filtrado():
+def test_listar_tablas_usa_catalogo_sin_filtros():
     consultas = []
 
     class Cursor:
-        def execute(self, sql, params):
+        def execute(self, sql, params=()):
             consultas.append((sql, params))
         def fetchall(self):
-            return [("dbo", "BD_SINERGIA_16112026", None)]
+            return [("dbo", "SALUS_NOVIEMBRE", None), ("otro", "PADRON_202611", None)]
 
     class Conn:
         def cursor(self):
             return Cursor()
 
-    assert S.listar_tablas(Conn(), "MERCADEO") == ["dbo.BD_SINERGIA_16112026"]
+    assert S.listar_tablas(Conn(), "MERCADEO") == ["dbo.SALUS_NOVIEMBRE", "otro.PADRON_202611"]
     sql, params = consultas[0]
     assert "MERCADEO].sys.tables" in sql and "MERCADEO].sys.schemas" in sql
-    assert "t.name LIKE ?" in sql and params == ("%sinergia%", "AFI[_]%")
+    assert "LIKE" not in sql.upper() and "WHERE" not in sql.upper() and params == ()
 
 
 def test_sql_nacional_sin_estado_muestra_columnas_faltantes(cli, monkeypatch):

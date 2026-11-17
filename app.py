@@ -228,7 +228,7 @@ def _conexion_de(f, previa: dict | None = None) -> S.Conexion:
     p = previa or {}
     return S.Conexion(servidor=(p.get("servidor") or f.get("servidor", "")).strip(), base=(p.get("base") or f.get("base", base.base)).strip(), driver=base.driver,
                       usuario=(p["usuario"] if "usuario" in p else f.get("usuario", "")).strip(), clave=f.get("clave", "") or base.clave,
-                      confiar_certificado=bool(p["confiar"]) if "confiar" in p else ("confiar" in f), patron_nac=base.patron_nac, patron_bdua=base.patron_bdua)
+                      confiar_certificado=bool(p["confiar"]) if "confiar" in p else ("confiar" in f))
 
 
 @app.post("/paso/1/sql")
